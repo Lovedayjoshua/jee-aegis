@@ -1,0 +1,4 @@
+-keepattributes Signature,InnerClasses,EnclosingMethod
+-keep class ng.jee.aegis.connector.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**

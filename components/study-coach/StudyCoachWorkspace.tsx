@@ -1,0 +1,1333 @@
+"use client";
+
+import {
+  AlertCircle,
+  AlertTriangle,
+  BookOpen,
+  Camera,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  FileText,
+  GraduationCap,
+  Lightbulb,
+  Loader2,
+  Mic,
+  Monitor,
+  Paperclip,
+  RefreshCw,
+  Send,
+  Sparkles,
+  Square,
+  Volume2,
+  VolumeX,
+  X,
+  XCircle,
+} from "lucide-react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { captureScaledJpegFrame } from "@/lib/video/frame-capturer";
+import { getScenarioById, STUDY_SCENARIOS } from "@/lib/study-coach/scenarios";
+import {
+  AnalyzeWorkApiResponse,
+  CoachMode,
+  DrillQuestion,
+  GroundingCitation,
+  RubricCriterion,
+  StepAssessment,
+  StudySessionRecord,
+  TranscriptEntry,
+  VideoSourceMode,
+  VisualHintCard,
+} from "@/lib/study-coach/types";
+import { KaTeXBlock } from "./KaTeXBlock";
+import { SessionSummaryModal } from "./SessionSummaryModal";
+
+type SidebarTab = "logic" | "hints" | "drill";
+
+const LOCAL_STORAGE_KEY = "socraticlab_study_sessions_v1";
+
+function nowLabel(): string {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function formatTimer(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+function buildInitialRubric(scenarioId: string): RubricCriterion[] {
+  return getScenarioById(scenarioId).rubric.map((item) => ({
+    ...item,
+    score: 0,
+  }));
+}
+
+function detectSnippetKind(snippet: string): "latex" | "code" {
+  const hasCodeSignals =
+    snippet.includes("\n") ||
+    /\b(def|for|while|if|return|const|let|function)\b/.test(snippet);
+  const hasLatexSignals =
+    snippet.includes("\\") ||
+    snippet.includes("\\int") ||
+    snippet.includes("\\frac") ||
+    snippet.includes("^");
+  if (hasCodeSignals && !snippet.includes("\\int") && !snippet.includes("\\frac")) {
+    return "code";
+  }
+  return hasLatexSignals ? "latex" : "code";
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = String(reader.result ?? "");
+      const commaIdx = res.indexOf(",");
+      resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+    };
+    reader.onerror = () => reject(new Error("Failed to read media blob."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function StudyCoachWorkspace() {
+  const [scenarioId, setScenarioId] = useState<string>("math-ibp");
+  const [mode, setMode] = useState<CoachMode>("coach");
+  const [videoSource, setVideoSource] = useState<VideoSourceMode>("webcam");
+  const [facingMode, setFacingMode] = useState<"environment" | "user">(
+    "environment"
+  );
+  const [activeTab, setActiveTab] = useState<SidebarTab>("logic");
+
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState<boolean>(false);
+  const [voiceReadoutEnabled, setVoiceReadoutEnabled] = useState<boolean>(true);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const [activeModelBadge, setActiveModelBadge] = useState<string>(
+    "gemini-3.5-flash"
+  );
+
+  const [textQuestion, setTextQuestion] = useState<string>("");
+  const [pdfAttachment, setPdfAttachment] = useState<{
+    name: string;
+    base64: string;
+  } | null>(null);
+
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [steps, setSteps] = useState<StepAssessment[]>([]);
+  const [rubric, setRubric] = useState<RubricCriterion[]>(() =>
+    buildInitialRubric("math-ibp")
+  );
+  const [hints, setHints] = useState<VisualHintCard[]>([]);
+  const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
+  const [latestReply, setLatestReply] = useState<string | null>(null);
+
+  const [weaknessTopic, setWeaknessTopic] = useState<string | null>(null);
+  const [drillQuestions, setDrillQuestions] = useState<DrillQuestion[]>([]);
+  const [citations, setCitations] = useState<GroundingCitation[]>([]);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>(
+    {}
+  );
+
+  const [completedSummary, setCompletedSummary] =
+    useState<StudySessionRecord | null>(null);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const startedAtRef = useRef<string>("");
+
+  const scenario = getScenarioById(scenarioId);
+
+  const speakText = useCallback(
+    (text: string, force = false) => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        return;
+      }
+      if (!force && !voiceReadoutEnabled) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.02;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    },
+    [voiceReadoutEnabled]
+  );
+
+  const stopVideoStream = useCallback(() => {
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach((t) => t.stop());
+      videoStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+  }, []);
+
+  const startVideoStream = useCallback(
+    async (source: VideoSourceMode, cameraFacing: "environment" | "user") => {
+      stopVideoStream();
+      setErrorBanner(null);
+
+      try {
+        const stream =
+          source === "webcam"
+            ? await navigator.mediaDevices.getUserMedia({
+                video: {
+                  facingMode: { ideal: cameraFacing },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                },
+                audio: false,
+              })
+            : await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: { ideal: 10, max: 15 } },
+                audio: false,
+              });
+
+        videoStreamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setIsCameraActive(true);
+
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          track.onended = () => {
+            setIsCameraActive(false);
+          };
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Camera or screen share permission denied.";
+        setErrorBanner(msg);
+      }
+    },
+    [stopVideoStream]
+  );
+
+  // Start webcam preview on mount & run session timer
+  useEffect(() => {
+    startedAtRef.current = new Date().toISOString();
+    void startVideoStream("webcam", "environment");
+    const timer = window.setInterval(() => {
+      setElapsedSeconds((s) => s + 1);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+      stopVideoStream();
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [startVideoStream, stopVideoStream]);
+
+  const handleSelectScenario = (nextId: string) => {
+    const next = getScenarioById(nextId);
+    setScenarioId(next.id);
+    setVideoSource(next.recommendedSource);
+    setRubric(buildInitialRubric(next.id));
+    setSteps([]);
+    setHints([]);
+    setTranscripts([]);
+    setLatestReply(null);
+    setWeaknessTopic(null);
+    setDrillQuestions([]);
+    setCitations([]);
+    setSelectedAnswers({});
+    setElapsedSeconds(0);
+    startedAtRef.current = new Date().toISOString();
+    void startVideoStream(next.recommendedSource, facingMode);
+  };
+
+  const handleSwitchVideoSource = (nextSource: VideoSourceMode) => {
+    setVideoSource(nextSource);
+    void startVideoStream(nextSource, facingMode);
+  };
+
+  const handleFlipCamera = () => {
+    const nextFacing = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(nextFacing);
+    if (videoSource === "webcam") {
+      void startVideoStream("webcam", nextFacing);
+    }
+  };
+
+  const handlePdfUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      setErrorBanner("Please attach a valid PDF lab manual or exam sheet.");
+      return;
+    }
+    try {
+      const base64 = await blobToBase64(file);
+      setPdfAttachment({ name: file.name, base64 });
+      setErrorBanner(null);
+    } catch {
+      setErrorBanner("Failed to read the attached PDF file.");
+    }
+  };
+
+  const analyzeSnapshot = useCallback(
+    async (audioBase64?: string, audioMimeType?: string) => {
+      const hasText = Boolean(textQuestion.trim());
+      const hasAudio = Boolean(audioBase64);
+      let imageBase64: string | undefined;
+
+      if (videoRef.current && isCameraActive) {
+        if (!captureCanvasRef.current) {
+          captureCanvasRef.current = document.createElement("canvas");
+        }
+        const captured = captureScaledJpegFrame(
+          videoRef.current,
+          captureCanvasRef.current,
+          1280,
+          720,
+          0.85
+        );
+        if (captured) imageBase64 = captured;
+      }
+
+      if (!imageBase64 && !hasText && !hasAudio) {
+        setErrorBanner(
+          "Enable your camera/screen or type a question below to get help."
+        );
+        return;
+      }
+
+      setIsAnalyzing(true);
+      setErrorBanner(null);
+
+      try {
+        const res = await fetch("/api/analyze-work", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64,
+            audioBase64,
+            audioMimeType,
+            referencePdfBase64: pdfAttachment?.base64,
+            textQuestion: textQuestion.trim() || undefined,
+            scenarioId,
+            mode,
+            previousSteps: steps,
+          }),
+        });
+
+        const data = (await res.json()) as AnalyzeWorkApiResponse & {
+          error?: string;
+          message?: string;
+        };
+
+        if (!res.ok || !data.stage1) {
+          throw new Error(data.message || "Analysis request failed.");
+        }
+
+        const { stage1, drill, citations: nextCitations, models } = data;
+        setActiveModelBadge(models.stage1);
+        setTextQuestion("");
+
+        const ts = nowLabel();
+
+        // Update Step Checks
+        if (stage1.step_checks.length > 0) {
+          setSteps((prev) => [
+            ...prev,
+            ...stage1.step_checks.map((sc) => ({
+              id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              stepNumber: sc.step_number,
+              status: sc.status,
+              concept: sc.concept,
+              lineQuote: sc.line_quote,
+              hintGiven: sc.feedback,
+              timestamp: ts,
+            })),
+          ]);
+        }
+
+        // Update Rubric
+        if (stage1.rubric_updates.length > 0) {
+          setRubric((prev) =>
+            prev.map((item) => {
+              const update = stage1.rubric_updates.find(
+                (u) => u.criterion_id === item.id
+              );
+              if (!update) return item;
+              return {
+                ...item,
+                score: Math.max(
+                  0,
+                  Math.min(item.maxScore, item.score + update.score_delta)
+                ),
+                feedback: update.feedback,
+                lastUpdated: ts,
+              };
+            })
+          );
+        }
+
+        // Update Visual Hint Card
+        if (stage1.visual_hint?.formula_or_code) {
+          setHints((prev) => [
+            {
+              id: `hint-${Date.now()}`,
+              title: stage1.visual_hint.title || "Socratic Hint",
+              snippet: stage1.visual_hint.formula_or_code,
+              explanation: stage1.visual_hint.explanation,
+              kind: detectSnippetKind(stage1.visual_hint.formula_or_code),
+              timestamp: ts,
+            },
+            ...prev,
+          ]);
+        }
+
+        // Update Transcripts (work, student voice, coach reply)
+        const newEntries: TranscriptEntry[] = [];
+        if (stage1.transcribed_work) {
+          newEntries.push({
+            id: `work-${Date.now()}`,
+            speaker: "work",
+            text: stage1.transcribed_work,
+            timestamp: ts,
+          });
+        }
+        if (stage1.voice_transcript) {
+          newEntries.push({
+            id: `student-${Date.now()}`,
+            speaker: "student",
+            text: stage1.voice_transcript,
+            timestamp: ts,
+          });
+        }
+        if (stage1.socratic_reply) {
+          newEntries.push({
+            id: `coach-${Date.now()}`,
+            speaker: "coach",
+            text: stage1.socratic_reply,
+            timestamp: ts,
+          });
+          setLatestReply(stage1.socratic_reply);
+          speakText(stage1.socratic_reply);
+        }
+        if (newEntries.length > 0) {
+          setTranscripts((prev) => [...prev, ...newEntries]);
+        }
+
+        // Update Stage 2 Grounded Drill
+        if (Array.isArray(drill) && drill.length > 0) {
+          setWeaknessTopic(stage1.weakness_topic);
+          setDrillQuestions(drill);
+          setCitations(nextCitations ?? []);
+          setSelectedAnswers({});
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to analyze work.";
+        setErrorBanner(msg);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    },
+    [
+      isCameraActive,
+      mode,
+      pdfAttachment?.base64,
+      scenarioId,
+      speakText,
+      steps,
+      textQuestion,
+    ]
+  );
+
+  // Push-to-Talk via MediaRecorder
+  const startVoiceRecording = async () => {
+    if (isAnalyzing || isRecordingVoice) return;
+    setErrorBanner(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        micStreamRef.current?.getTracks().forEach((t) => t.stop());
+        micStreamRef.current = null;
+
+        if (blob.size > 0) {
+          const audioBase64 = await blobToBase64(blob);
+          void analyzeSnapshot(audioBase64, mimeType);
+        } else {
+          void analyzeSnapshot();
+        }
+      };
+
+      recorder.start();
+      setIsRecordingVoice(true);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Microphone permission denied.";
+      setErrorBanner(msg);
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (!isRecordingVoice || !mediaRecorderRef.current) return;
+    setIsRecordingVoice(false);
+    if (mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const handleEndAndGrade = () => {
+    const endedAt = new Date().toISOString();
+    const totalScore = rubric.reduce((acc, r) => acc + r.score, 0);
+    const maxScore = rubric.reduce((acc, r) => acc + r.maxScore, 0);
+
+    const record: StudySessionRecord = {
+      id: `sess-${Date.now()}`,
+      scenarioId: scenario.id,
+      scenarioTitle: scenario.title,
+      mode,
+      startedAt: startedAtRef.current || endedAt,
+      endedAt,
+      durationSeconds: elapsedSeconds,
+      totalScore,
+      maxScore,
+      steps: [...steps],
+      rubric: [...rubric],
+      hintsUsed: hints.length,
+    };
+
+    try {
+      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      const prev = raw ? (JSON.parse(raw) as StudySessionRecord[]) : [];
+      window.localStorage.setItem(
+        LOCAL_STORAGE_KEY,
+        JSON.stringify([record, ...prev].slice(0, 20))
+      );
+    } catch {
+      // Ignore storage errors
+    }
+
+    fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(record),
+    }).catch(() => {});
+
+    setCompletedSummary(record);
+  };
+
+  const totalScore = rubric.reduce((sum, r) => sum + r.score, 0);
+  const maxScore = rubric.reduce((sum, r) => sum + r.maxScore, 0);
+  const masteryPct = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+  const examRemaining = Math.max(
+    0,
+    scenario.durationMinutes * 60 - elapsedSeconds
+  );
+
+  return (
+    <div className="flex min-h-0 flex-col bg-slate-50 text-slate-900">
+      {/* Top Academic Header */}
+      <header className="border-b border-slate-200 bg-white px-3 py-2.5 sm:px-6 sm:py-3">
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-700 text-white shadow-xs sm:h-9 sm:w-9">
+                <GraduationCap className="h-4 w-4 sm:h-5 sm:w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <h1 className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">
+                    SocraticLab
+                  </h1>
+                  <span className="truncate rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-blue-800">
+                    {activeModelBadge}
+                  </span>
+                </div>
+                <p className="truncate text-[11px] text-slate-500 sm:text-xs">
+                  Multimodal Exam &amp; Lab Practical Study Coach
+                </p>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-xs font-semibold text-slate-700 lg:hidden">
+              <Clock className="h-3.5 w-3.5 text-slate-500" />
+              <span>
+                {mode === "exam"
+                  ? formatTimer(examRemaining)
+                  : formatTimer(elapsedSeconds)}
+              </span>
+            </div>
+          </div>
+
+          {/* Scenario Quick-Load Pills — horizontal scroll on mobile, wrapped on desktop */}
+          <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible sm:pb-0">
+            {STUDY_SCENARIOS.map((item) => {
+              const active = item.id === scenarioId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={isAnalyzing}
+                  onClick={() => handleSelectScenario(item.id)}
+                  className={`min-h-[38px] shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    active
+                      ? "border-blue-700 bg-blue-50 text-blue-800"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                  } disabled:opacity-60`}
+                >
+                  {item.title}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Mode Toggle + Timer + End & Grade */}
+          <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+              <button
+                type="button"
+                onClick={() => setMode("coach")}
+                className={`min-h-[36px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  mode === "coach"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Practice Coach
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("exam")}
+                className={`min-h-[36px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  mode === "exam"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Timed Exam
+              </button>
+            </div>
+
+            <div className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs font-semibold text-slate-700 lg:flex">
+              <Clock className="h-3.5 w-3.5 text-slate-500" />
+              <span>
+                {mode === "exam"
+                  ? formatTimer(examRemaining)
+                  : formatTimer(elapsedSeconds)}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleEndAndGrade}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100"
+            >
+              <Square className="h-3 w-3 fill-current text-red-600" />
+              End &amp; Grade
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Error Banner */}
+      {errorBanner && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-2.5 sm:px-6">
+          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 text-sm text-red-800">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+              <span>{errorBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setErrorBanner(null)}
+              className="text-xs font-semibold text-red-700 underline hover:text-red-900"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Workspace (65% Stage / 35% Sidebar) */}
+      <main className="mx-auto grid w-full max-w-[1600px] flex-1 grid-cols-1 gap-3 p-2.5 sm:gap-4 sm:p-4 lg:grid-cols-12 lg:p-6">
+        {/* Left Stage */}
+        <section className="flex min-w-0 flex-col gap-3 sm:gap-3.5 lg:col-span-7 xl:col-span-8">
+          {/* Scenario Task Strip */}
+          <div className="flex flex-col gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4 sm:py-3">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                  {scenario.subject}
+                </p>
+                <p className="text-sm font-medium leading-snug text-slate-900">
+                  {scenario.sampleProblem}
+                </p>
+              </div>
+            </div>
+
+            {/* Attach Lab / Exam PDF Pill */}
+            <div className="flex items-center gap-2">
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={handlePdfUpload}
+                className="hidden"
+              />
+              {pdfAttachment ? (
+                <div className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">
+                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <span className="max-w-[160px] truncate">
+                    {pdfAttachment.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPdfAttachment(null);
+                      if (pdfInputRef.current) pdfInputRef.current.value = "";
+                    }}
+                    className="rounded-full p-1 hover:bg-blue-200"
+                    aria-label="Remove attached PDF"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => pdfInputRef.current?.click()}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Attach Lab/Exam PDF
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Live Camera / Screen Preview */}
+          <div className="relative flex min-h-[220px] flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-950 shadow-xs sm:min-h-[340px] lg:min-h-[460px]">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-full w-full flex-1 object-contain"
+            />
+
+            {/* Status Overlay */}
+            <div className="pointer-events-none absolute top-2.5 left-2.5 right-2.5 flex items-center gap-2 sm:top-3 sm:left-3">
+              <div
+                className={`inline-flex max-w-full items-center gap-2 truncate rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold backdrop-blur-xs sm:px-3 sm:text-[11px] ${
+                  isAnalyzing
+                    ? "border-amber-400/40 bg-slate-900/85 text-amber-300"
+                    : isRecordingVoice
+                      ? "border-red-400/50 bg-slate-900/85 text-red-300"
+                      : isCameraActive
+                        ? "border-emerald-400/40 bg-slate-900/80 text-emerald-300"
+                        : "border-slate-600/60 bg-slate-900/80 text-slate-300"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    isAnalyzing
+                      ? "animate-pulse bg-amber-400"
+                      : isRecordingVoice
+                        ? "animate-ping bg-red-400"
+                        : isCameraActive
+                          ? "bg-emerald-400"
+                          : "bg-slate-400"
+                  }`}
+                />
+                <span className="truncate">
+                  {isAnalyzing
+                    ? `ANALYZING (${activeModelBadge.toUpperCase()})...`
+                    : isRecordingVoice
+                      ? "RECORDING VOICE QUESTION..."
+                      : isCameraActive
+                        ? `${videoSource === "webcam" ? "WEBCAM" : "SCREEN"} READY`
+                        : "VIDEO INACTIVE"}
+                </span>
+              </div>
+            </div>
+
+            {!isCameraActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center sm:p-6">
+                <button
+                  type="button"
+                  onClick={() => startVideoStream(videoSource, facingMode)}
+                  className="min-h-[44px] rounded-xl bg-blue-700 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-800"
+                >
+                  Enable {videoSource === "webcam" ? "Webcam" : "Screen Share"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Latest Spoken Coach Reply Banner */}
+          {latestReply && (
+            <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-3">
+              <div className="space-y-0.5">
+                <p className="text-[11px] font-bold tracking-wider text-blue-800 uppercase">
+                  Coach Socratic Feedback
+                </p>
+                <p className="text-sm leading-relaxed text-slate-900">
+                  {latestReply}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => speakText(latestReply, true)}
+                className="shrink-0 rounded-lg border border-blue-200 bg-white p-2 text-blue-700 hover:bg-blue-100"
+                title="Replay spoken feedback"
+              >
+                <Volume2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Multimodal Capture & Action Controls */}
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 sm:px-4">
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchVideoSource("webcam")}
+                    className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      videoSource === "webcam"
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    Webcam
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchVideoSource("screen")}
+                    className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      videoSource === "screen"
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Monitor className="h-3.5 w-3.5" />
+                    Screen
+                  </button>
+                </div>
+
+                {videoSource === "webcam" && (
+                  <button
+                    type="button"
+                    onClick={handleFlipCamera}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    {facingMode === "environment" ? "Rear" : "Front"}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !voiceReadoutEnabled;
+                    setVoiceReadoutEnabled(next);
+                    if (!next && "speechSynthesis" in window) {
+                      window.speechSynthesis.cancel();
+                    }
+                  }}
+                  className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    voiceReadoutEnabled
+                      ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      : "border-slate-200 bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {voiceReadoutEnabled ? (
+                    <>
+                      <Volume2 className="h-3.5 w-3.5 text-blue-700" />
+                      Voice On
+                    </>
+                  ) : (
+                    <>
+                      <VolumeX className="h-3.5 w-3.5" />
+                      Muted
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                {/* Push-to-Talk */}
+                <button
+                  type="button"
+                  disabled={isAnalyzing}
+                  onMouseDown={startVoiceRecording}
+                  onMouseUp={stopVoiceRecording}
+                  onMouseLeave={() => {
+                    if (isRecordingVoice) stopVoiceRecording();
+                  }}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    void startVoiceRecording();
+                  }}
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    stopVoiceRecording();
+                  }}
+                  className={`inline-flex min-h-[44px] select-none items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors sm:min-h-[38px] sm:gap-2 sm:px-3.5 ${
+                    isRecordingVoice
+                      ? "border-red-600 bg-red-600 text-white shadow-sm"
+                      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <Mic className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">
+                    {isRecordingVoice ? "Release..." : "Hold to Ask"}
+                  </span>
+                </button>
+
+                {/* Primary Snap & Grade Step CTA */}
+                <button
+                  type="button"
+                  disabled={isAnalyzing || (!isCameraActive && !textQuestion.trim())}
+                  onClick={() => void analyzeSnapshot()}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[38px] sm:gap-2 sm:px-4"
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                      <span className="truncate">Grading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">Snap &amp; Grade</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Optional quick text question — 16px on mobile prevents iOS zoom */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!isAnalyzing && (isCameraActive || textQuestion.trim())) {
+                  void analyzeSnapshot();
+                }
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={textQuestion}
+                onChange={(e) => setTextQuestion(e.target.value)}
+                placeholder="Type a JAMB/WAEC or step question..."
+                className="min-h-[44px] min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none sm:min-h-[38px] sm:text-xs"
+              />
+              <button
+                type="submit"
+                disabled={isAnalyzing || !textQuestion.trim()}
+                className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-200 disabled:opacity-50 sm:min-h-[38px]"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Ask
+              </button>
+            </form>
+          </div>
+        </section>
+
+        {/* Right Sidebar (3 Tabs) */}
+        <aside className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white lg:col-span-5 xl:col-span-4">
+          {/* Tab Switcher */}
+          <div className="grid grid-cols-3 gap-1 border-b border-slate-200 bg-slate-50 p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab("logic")}
+              className={`min-h-[42px] rounded-lg px-1.5 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
+                activeTab === "logic"
+                  ? "bg-white text-blue-800 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Rubric ({steps.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("hints")}
+              className={`min-h-[42px] rounded-lg px-1.5 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
+                activeTab === "hints"
+                  ? "bg-white text-blue-800 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Hints ({hints.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("drill")}
+              className={`min-h-[42px] rounded-lg px-1.5 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
+                activeTab === "drill"
+                  ? "bg-white text-blue-800 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Drill ({drillQuestions.length})
+            </button>
+          </div>
+
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
+            {/* TAB 1: Logic & Rubric */}
+            {activeTab === "logic" && (
+              <>
+                {/* Mastery Meter */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-bold tracking-wider text-slate-700 uppercase">
+                      Rubric Mastery
+                    </span>
+                    <span className="font-mono text-xs font-bold text-blue-700">
+                      {totalScore}/{maxScore} ({masteryPct}%)
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full rounded-full bg-blue-700 transition-all duration-300"
+                      style={{ width: `${masteryPct}%` }}
+                    />
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {rubric.map((item) => {
+                      const pct =
+                        item.maxScore > 0
+                          ? Math.round((item.score / item.maxScore) * 100)
+                          : 0;
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-lg border border-slate-200 bg-white p-2.5"
+                        >
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-semibold text-slate-800">
+                              {item.label}
+                            </span>
+                            <span className="font-mono font-semibold text-slate-700">
+                              {item.score}/{item.maxScore}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-emerald-600 transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {item.feedback || item.description}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Step-by-Step Logic Tracker */}
+                <div>
+                  <h2 className="mb-2 text-xs font-bold tracking-wider text-slate-700 uppercase">
+                    Step-by-Step Verification
+                  </h2>
+                  {steps.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                      Click <strong>Snap &amp; Grade Step</strong> or{" "}
+                      <strong>Hold to Ask Coach</strong> to transcribe and grade
+                      your work.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {steps.map((step) => {
+                        const style =
+                          step.status === "correct"
+                            ? "border-emerald-200 bg-emerald-50/70"
+                            : step.status === "warning"
+                              ? "border-amber-200 bg-amber-50/70"
+                              : "border-red-200 bg-red-50/70";
+                        return (
+                          <div
+                            key={step.id}
+                            className={`rounded-lg border p-3 ${style}`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                {step.status === "correct" ? (
+                                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                                ) : step.status === "warning" ? (
+                                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                                ) : (
+                                  <XCircle className="h-4 w-4 shrink-0 text-red-600" />
+                                )}
+                                <span className="text-xs font-semibold text-slate-900">
+                                  Step {step.stepNumber}: {step.concept}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[10px] text-slate-500">
+                                {step.timestamp}
+                              </span>
+                            </div>
+                            {step.lineQuote && (
+                              <pre className="mt-1.5 overflow-x-auto rounded border border-slate-200/80 bg-white/90 px-2 py-1 font-mono text-[11px] text-slate-800">
+                                {step.lineQuote}
+                              </pre>
+                            )}
+                            <p className="mt-1.5 text-xs leading-snug text-slate-700">
+                              {step.hintGiven}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* TAB 2: Socratic Hint & Transcripts */}
+            {activeTab === "hints" && (
+              <>
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <Lightbulb className="h-4 w-4 text-amber-600" />
+                    <h2 className="text-xs font-bold tracking-wider text-slate-700 uppercase">
+                      Visual Hint Cards
+                    </h2>
+                  </div>
+                  {hints.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">
+                      KaTeX formulas and code pattern hints appear here after
+                      analysis.
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {hints.map((hint) => (
+                        <div
+                          key={hint.id}
+                          className="rounded-xl border border-amber-200 bg-amber-50/50 p-3"
+                        >
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-slate-900">
+                              {hint.title}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400">
+                              {hint.timestamp}
+                            </span>
+                          </div>
+                          <KaTeXBlock snippet={hint.snippet} kind={hint.kind} />
+                          {hint.explanation && (
+                            <p className="mt-1.5 text-xs text-slate-700">
+                              {hint.explanation}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h2 className="mb-2 text-xs font-bold tracking-wider text-slate-700 uppercase">
+                    Work &amp; Voice Log
+                  </h2>
+                  {transcripts.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">
+                      Transcribed handwriting, voice questions, and coach
+                      replies will be logged here.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {transcripts.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className={`rounded-lg border px-3 py-2 text-xs leading-relaxed ${
+                            entry.speaker === "coach"
+                              ? "border-blue-100 bg-blue-50/70"
+                              : entry.speaker === "work"
+                                ? "border-slate-200 bg-slate-50 font-mono text-[11px]"
+                                : "border-emerald-100 bg-emerald-50/60"
+                          }`}
+                        >
+                          <div className="mb-0.5 flex items-center justify-between">
+                            <span className="text-[10px] font-bold tracking-wide text-slate-600 uppercase">
+                              {entry.speaker === "coach"
+                                ? "Coach"
+                                : entry.speaker === "work"
+                                  ? "Transcribed Work"
+                                  : "Student Voice"}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400">
+                              {entry.timestamp}
+                            </span>
+                          </div>
+                          <p className="whitespace-pre-wrap text-slate-800">
+                            {entry.text}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* TAB 3: Grounded Exam Micro-Drill */}
+            {activeTab === "drill" && (
+              <>
+                {drillQuestions.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                    After you snap a step, Gemini generates a 2-question
+                    practice drill grounded in real exam standards via Google
+                    Search.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {weaknessTopic && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                        <p className="text-[10px] font-bold tracking-wider text-blue-700 uppercase">
+                          Targeted Practice Topic
+                        </p>
+                        <p className="text-xs font-semibold text-slate-900">
+                          {weaknessTopic}
+                        </p>
+                      </div>
+                    )}
+
+                    {drillQuestions.map((q, qIdx) => {
+                      const chosen = selectedAnswers[q.id];
+                      const answered = chosen !== undefined;
+                      return (
+                        <div
+                          key={q.id}
+                          className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5"
+                        >
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="font-mono text-[10px] font-bold text-slate-500 uppercase">
+                              Question {qIdx + 1}
+                            </span>
+                            <span className="rounded bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-slate-200">
+                              {q.examStandard}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold leading-relaxed text-slate-900">
+                            {q.question}
+                          </p>
+                          <div className="mt-2.5 space-y-1.5">
+                            {q.options.map((opt, optIdx) => {
+                              const isSelected = chosen === optIdx;
+                              const isCorrect = optIdx === q.correctIndex;
+                              let btnClass =
+                                "border-slate-200 bg-white text-slate-800 hover:bg-slate-50";
+                              if (answered) {
+                                if (isCorrect) {
+                                  btnClass =
+                                    "border-emerald-500 bg-emerald-50 text-emerald-900 font-semibold";
+                                } else if (isSelected) {
+                                  btnClass =
+                                    "border-red-400 bg-red-50 text-red-900";
+                                }
+                              }
+                              return (
+                                <button
+                                  key={optIdx}
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedAnswers((prev) => ({
+                                      ...prev,
+                                      [q.id]: optIdx,
+                                    }))
+                                  }
+                                  className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${btnClass}`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {answered && (
+                            <div className="mt-2.5 rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-700">
+                              <span className="font-semibold text-slate-900">
+                                Explanation:{" "}
+                              </span>
+                              {q.explanation}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {citations.length > 0 && (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="mb-2 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                          Google Search Grounding Sources
+                        </p>
+                        <ul className="space-y-1.5">
+                          {citations.map((c) => (
+                            <li key={c.url}>
+                              <a
+                                href={c.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 hover:underline"
+                              >
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <span className="line-clamp-1">{c.title}</span>
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </aside>
+      </main>
+
+      <SessionSummaryModal
+        summary={completedSummary}
+        onClose={() => setCompletedSummary(null)}
+      />
+    </div>
+  );
+}

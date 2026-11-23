@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python / backend / local databases
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.db
+*.sqlite
+*.sqlite3
+
+# android build artifacts
+android/.gradle/
+android/app/build/
+android/local.properties
+android/app/google-services.json

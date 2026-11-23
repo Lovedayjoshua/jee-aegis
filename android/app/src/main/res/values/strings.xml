@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">JEE AEGIS Connector</string>
+    <string name="channel_aegis_service">AEGIS Device Protection</string>
+    <string name="channel_aegis_alarm">AEGIS Recovery Alarm</string>
+</resources>
