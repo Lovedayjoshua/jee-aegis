@@ -1,16 +1,18 @@
 import fs from "fs";
 import path from "path";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const APK_PATH = path.join(process.cwd(), "public", "downloads", "jee-aegis.apk");
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  void request.nextUrl.searchParams.get("t");
+
   if (!fs.existsSync(APK_PATH)) {
     return NextResponse.json(
       {
-        error: "APK_NOT_COMPILED",
+        error: "APK_BUILD_PENDING",
         message:
-          "JEE-AEGIS.apk has not been compiled yet. Build the Android project on a machine with JDK 17 and Android SDK 35, then place the output at public/downloads/jee-aegis.apk.",
+          "The JEE AEGIS Android application is currently being prepared by our automated build system.",
       },
       { status: 404 }
     );
@@ -19,7 +21,7 @@ export async function GET() {
   const stat = fs.statSync(APK_PATH);
   if (stat.size === 0) {
     return NextResponse.json(
-      { error: "APK_EMPTY", message: "The APK file on disk is empty." },
+      { error: "APK_EMPTY", message: "The APK package is empty." },
       { status: 500 }
     );
   }

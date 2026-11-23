@@ -107,6 +107,7 @@ export function StudyCoachWorkspace() {
   const [activeTab, setActiveTab] = useState<SidebarTab>("logic");
 
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState<boolean>(false);
   const [voiceReadoutEnabled, setVoiceReadoutEnabled] = useState<boolean>(true);
@@ -174,8 +175,23 @@ export function StudyCoachWorkspace() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    setVideoStream(null);
     setIsCameraActive(false);
   }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoStream) return;
+    video.srcObject = videoStream;
+    video.play().catch((err) => {
+      console.error("StudyCoach video play error:", err);
+    });
+    return () => {
+      if (video.srcObject === videoStream) {
+        video.srcObject = null;
+      }
+    };
+  }, [videoStream]);
 
   const startVideoStream = useCallback(
     async (source: VideoSourceMode, cameraFacing: "environment" | "user") => {
@@ -183,31 +199,40 @@ export function StudyCoachWorkspace() {
       setErrorBanner(null);
 
       try {
-        const stream =
-          source === "webcam"
-            ? await navigator.mediaDevices.getUserMedia({
-                video: {
-                  facingMode: { ideal: cameraFacing },
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                },
-                audio: false,
-              })
-            : await navigator.mediaDevices.getDisplayMedia({
-                video: { frameRate: { ideal: 10, max: 15 } },
-                audio: false,
-              });
+        let stream: MediaStream;
+        if (source === "webcam") {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: cameraFacing },
+              audio: false,
+            });
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false,
+            });
+          }
+        } else {
+          if (typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+            setErrorBanner(
+              "Screen sharing isn't supported in this browser. Switch to Webcam or type your question below."
+            );
+            return;
+          }
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: { ideal: 10, max: 15 } },
+            audio: false,
+          });
+        }
 
         videoStreamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
+        setVideoStream(stream);
         setIsCameraActive(true);
 
         const track = stream.getVideoTracks()[0];
         if (track) {
           track.onended = () => {
+            setVideoStream(null);
             setIsCameraActive(false);
           };
         }
@@ -299,9 +324,9 @@ export function StudyCoachWorkspace() {
         const captured = captureScaledJpegFrame(
           videoRef.current,
           captureCanvasRef.current,
-          1280,
-          720,
-          0.85
+          960,
+          540,
+          0.75
         );
         if (captured) imageBase64 = captured;
       }
@@ -316,10 +341,14 @@ export function StudyCoachWorkspace() {
       setIsAnalyzing(true);
       setErrorBanner(null);
 
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 28000);
+
       try {
         const res = await fetch("/api/analyze-work", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             imageBase64,
             audioBase64,
@@ -439,10 +468,17 @@ export function StudyCoachWorkspace() {
           setSelectedAnswers({});
         }
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Failed to analyze work.";
+        const isAbort =
+          err instanceof Error &&
+          (err.name === "AbortError" || err.message.toUpperCase().includes("TIMEOUT"));
+        const msg = isAbort
+          ? "Analysis timed out. Please tap Retry or check your connection."
+          : err instanceof Error
+          ? err.message
+          : "Failed to analyze work.";
         setErrorBanner(msg);
       } finally {
+        window.clearTimeout(timeoutId);
         setIsAnalyzing(false);
       }
     },
@@ -663,18 +699,29 @@ export function StudyCoachWorkspace() {
       {/* Error Banner */}
       {errorBanner && (
         <div className="border-b border-red-200 bg-red-50 px-4 py-2.5 sm:px-6">
-          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 text-sm text-red-800">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 text-sm text-red-800">
             <div className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
               <span>{errorBanner}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setErrorBanner(null)}
-              className="text-xs font-semibold text-red-700 underline hover:text-red-900"
-            >
-              Dismiss
-            </button>
+            <div className="flex items-center gap-3">
+              {(isCameraActive || textQuestion.trim()) && !isAnalyzing && (
+                <button
+                  type="button"
+                  onClick={() => void analyzeSnapshot()}
+                  className="rounded-md bg-red-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-800"
+                >
+                  Retry
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setErrorBanner(null)}
+                className="text-xs font-semibold text-red-700 underline hover:text-red-900"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         </div>
       )}

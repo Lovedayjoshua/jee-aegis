@@ -89,6 +89,22 @@ const STAGE1_RESPONSE_SCHEMA: Schema = {
       description:
         "Specific STEM concept missed or currently being practiced, for grounded drill generation.",
     },
+    quick_drill: {
+      type: Type.ARRAY,
+      description: "2 rapid multiple-choice practice questions (4 options each) testing the weakness_topic.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          question: { type: Type.STRING },
+          options: { type: Type.ARRAY, items: { type: Type.STRING } },
+          correctIndex: { type: Type.INTEGER },
+          explanation: { type: Type.STRING },
+          examStandard: { type: Type.STRING },
+        },
+        required: ["id", "question", "options", "correctIndex", "explanation", "examStandard"],
+      },
+    },
   },
   required: [
     "transcribed_work",
@@ -173,86 +189,83 @@ export async function POST(request: NextRequest) {
       ),
     });
 
-    const stage1Call = await generateContentWithFallback({
+    const stage1Promise = generateContentWithFallback({
       contents: [{ role: "user", parts: stage1Parts }],
       config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: "application/json",
         responseSchema: STAGE1_RESPONSE_SCHEMA,
       },
     });
 
-    const stage1Text = stage1Call.response.text ?? "";
-    const stage1 = parseJsonFromText<Stage1AnalysisResult>(stage1Text);
+    // Run Stage 2 (Google Search Grounded Drill) in PARALLEL with Stage 1 so total latency is ~4.5s instead of ~16s
+    const drillTopic = body.textQuestion?.trim() || `${scenario.title} (${scenario.subject})`;
+    const stage2Prompt = `Search for real WAEC, JAMB, or undergraduate STEM exam standards and practice problems on: "${drillTopic}" (${scenario.subject}).
+Generate a 2-question rapid practice drill (multiple-choice with 4 options each).
+Return ONLY valid JSON:
+{"questions":[{"id":"q1","question":"...","options":["A","B","C","D"],"correctIndex":0,"explanation":"...","examStandard":"WAEC / JAMB"},{"id":"q2","question":"...","options":["A","B","C","D"],"correctIndex":1,"explanation":"...","examStandard":"WAEC / JAMB"}]}`;
 
-    // ------------------------------------------------------------------
-    // Stage 2: Grounded Exam Micro-Drill Generator (ThinkingLevel.LOW + Google Search)
-    // ------------------------------------------------------------------
-    const weakness = stage1.weakness_topic || scenario.title;
-    const stage2Prompt = `Search for real WAEC, JAMB, or undergraduate STEM exam standards and practice problems on the topic: "${weakness}" (in the context of ${scenario.subject}).
-
-Generate a 2-question rapid practice drill (multiple-choice with 4 options each) that tests this exact concept so the student can immediately verify their understanding.
-
-Return ONLY valid JSON matching this exact structure (no extra commentary):
-{
-  "questions": [
-    {
-      "id": "q1",
-      "question": "Clear question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctIndex": 0,
-      "explanation": "Concise step-by-step explanation of why this option is correct",
-      "examStandard": "e.g., WAEC / JAMB / Undergraduate Calculus"
-    },
-    {
-      "id": "q2",
-      "question": "Second question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctIndex": 1,
-      "explanation": "Concise explanation",
-      "examStandard": "e.g., Undergraduate STEM Practical"
-    }
-  ]
-}`;
-
-    let drill: DrillQuestion[] = [];
-    let citations: GroundingCitation[] = [];
-    let stage2Model = stage1Call.modelUsed;
-
-    try {
-      const stage2Call = await generateContentWithFallback({
+    const stage2Promise = Promise.race([
+      generateContentWithFallback({
         contents: [{ role: "user", parts: [{ text: stage2Prompt }] }],
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           tools: [{ googleSearch: {} }],
         },
-      });
-      stage2Model = stage2Call.modelUsed;
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("STAGE2_TIMEOUT")), 6500)
+      ),
+    ]);
 
-      const stage2Text = stage2Call.response.text ?? "";
-      const parsedDrill = parseJsonFromText<{ questions?: DrillQuestion[] }>(
-        stage2Text
-      );
-      if (Array.isArray(parsedDrill.questions)) {
-        drill = parsedDrill.questions.slice(0, 2);
-      }
+    const [stage1Call, stage2Settled] = await Promise.all([
+      stage1Promise,
+      stage2Promise.then(
+        (val) => ({ status: "fulfilled" as const, value: val }),
+        (reason) => ({ status: "rejected" as const, reason })
+      ),
+    ]);
 
-      const chunks =
-        stage2Call.response.candidates?.[0]?.groundingMetadata?.groundingChunks ??
-        [];
-      const seenUrls = new Set<string>();
-      for (const chunk of chunks) {
-        const uri = chunk.web?.uri;
-        if (uri && !seenUrls.has(uri)) {
-          seenUrls.add(uri);
-          citations.push({
-            title: chunk.web?.title || uri,
-            url: uri,
-          });
+    const stage1Text = stage1Call.response.text ?? "";
+    const stage1 = parseJsonFromText<
+      Stage1AnalysisResult & { quick_drill?: DrillQuestion[] }
+    >(stage1Text);
+
+    let drill: DrillQuestion[] = Array.isArray(stage1.quick_drill)
+      ? stage1.quick_drill.slice(0, 2)
+      : [];
+    const citations: GroundingCitation[] = [];
+    let stage2Model = stage1Call.modelUsed;
+
+    if (stage2Settled.status === "fulfilled") {
+      try {
+        const stage2Call = stage2Settled.value;
+        stage2Model = stage2Call.modelUsed;
+        const stage2Text = stage2Call.response.text ?? "";
+        const parsedDrill = parseJsonFromText<{ questions?: DrillQuestion[] }>(
+          stage2Text
+        );
+        if (Array.isArray(parsedDrill.questions) && parsedDrill.questions.length > 0) {
+          drill = parsedDrill.questions.slice(0, 2);
         }
+
+        const chunks =
+          stage2Call.response.candidates?.[0]?.groundingMetadata?.groundingChunks ??
+          [];
+        const seenUrls = new Set<string>();
+        for (const chunk of chunks) {
+          const uri = chunk.web?.uri;
+          if (uri && !seenUrls.has(uri)) {
+            seenUrls.add(uri);
+            citations.push({
+              title: chunk.web?.title || uri,
+              url: uri,
+            });
+          }
+        }
+      } catch {
+        // Keep stage1.quick_drill fallback
       }
-    } catch {
-      // Non-fatal: Stage 1 coaching still succeeds even if Stage 2 search grounding fails
     }
 
     return NextResponse.json({

@@ -1,0 +1,130 @@
+name: JEE AEGIS Android APK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "android/**"
+      - ".github/workflows/build-apk.yml"
+
+concurrency:
+  group: apk-build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build & Publish JEE AEGIS Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android Debug APK
+        run: |
+          sed -i 's/\r$//' android/gradlew
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Verify APK & Prepare Distribution
+        id: verify_apk
+        run: |
+          APK_SOURCE="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_SOURCE" ]; then
+            echo "::error::Expected APK not found at $APK_SOURCE"
+            exit 1
+          fi
+
+          SIZE_BYTES=$(stat -c%s "$APK_SOURCE")
+          if [ "$SIZE_BYTES" -le 0 ]; then
+            echo "::error::Generated APK at $APK_SOURCE is empty (0 bytes)."
+            exit 1
+          fi
+
+          SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES / (1024 * 1024)}")
+          MAX_GIT_BYTES=$((95 * 1024 * 1024))
+
+          mkdir -p public/downloads
+          cp "$APK_SOURCE" public/downloads/jee-aegis.apk
+
+          echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
+          echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
+
+          if [ "$SIZE_BYTES" -lt "$MAX_GIT_BYTES" ]; then
+            echo "commit_to_git=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "commit_to_git=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "## JEE AEGIS Android APK Build Summary"
+            echo "- **Status**: Build Succeeded"
+            echo "- **Source APK**: \`$APK_SOURCE\`"
+            echo "- **Published Path**: \`public/downloads/jee-aegis.apk\`"
+            echo "- **Size**: ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK as GitHub Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JEE-AEGIS-apk
+          path: public/downloads/jee-aegis.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Commit & Push APK to Repository (< 95 MB)
+        if: steps.verify_apk.outputs.commit_to_git == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f public/downloads/jee-aegis.apk
+          if git diff --cached --quiet; then
+            echo "APK is unchanged; skipping commit."
+          else
+            git commit -m "chore(apk): publish compiled JEE AEGIS Android APK (${{ steps.verify_apk.outputs.size_mb }} MB) [skip ci]"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Publish Large APK as GitHub Release Asset (>= 95 MB)
+        if: steps.verify_apk.outputs.commit_to_git == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm -f public/downloads/jee-aegis.apk
+          TAG="apk-latest"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" android/app/build/outputs/apk/debug/app-debug.apk#JEE-AEGIS.apk --clobber
+          else
+            gh release create "$TAG" android/app/build/outputs/apk/debug/app-debug.apk#JEE-AEGIS.apk \
+              --title "JEE AEGIS Android Connector APK" \
+              --notes "Automated JEE AEGIS Android Connector APK build (${{ steps.verify_apk.outputs.size_mb }} MB)."
+          fi
+
+      - name: Collect Build Failure Diagnostics
+        if: failure()
+        run: |
+          echo "::warning::Android APK build failed. Inspecting Gradle reports..."
+          find android -name "*.txt" -o -name "*.html" | grep "build/reports" || true

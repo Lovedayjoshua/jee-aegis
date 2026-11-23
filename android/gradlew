@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+APP_HOME="$(cd "$(dirname "$0")" && pwd)"
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+WRAPPER_URL="https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar"
+
+if [ ! -f "$WRAPPER_JAR" ]; then
+  mkdir -p "$(dirname "$WRAPPER_JAR")"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$WRAPPER_URL" -o "$WRAPPER_JAR"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$WRAPPER_JAR" "$WRAPPER_URL"
+  fi
+fi
+
+if [ -f "$WRAPPER_JAR" ]; then
+  if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    JAVACMD="$JAVA_HOME/bin/java"
+  else
+    JAVACMD="java"
+  fi
+  exec "$JAVACMD" -Xmx64m -Xms64m -classpath "$WRAPPER_JAR" org.gradle.wrapper.GradleWrapperMain "$@"
+elif command -v gradle >/dev/null 2>&1; then
+  exec gradle "$@"
+else
+  echo "Error: gradle-wrapper.jar could not be downloaded and system gradle is not available." >&2
+  exit 1
+fi

@@ -1,10 +1,13 @@
 import fs from "fs";
 import path from "path";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const APK_RELATIVE_PATH = path.join("public", "downloads", "jee-aegis.apk");
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Reference request URL so this route is evaluated dynamically on Check Again
+  void request.nextUrl.searchParams.get("t");
+
   const fullPath = path.join(process.cwd(), APK_RELATIVE_PATH);
   const exists = fs.existsSync(fullPath);
   let sizeBytes = 0;
@@ -19,14 +22,19 @@ export async function GET() {
 
   const available = exists && sizeBytes > 0;
 
-  return NextResponse.json({
-    available,
-    version: "1.0.0",
-    fileName: "JEE-AEGIS.apk",
-    downloadUrl: "/api/apk/download",
-    expectedPath: "public/downloads/jee-aegis.apk",
-    sizeBytes,
-    missingBuildTools: available ? [] : ["JDK 17", "Android SDK 35", "Gradle"],
-    buildCommand: "cd android && .\\gradlew assembleDebug",
-  });
+  return NextResponse.json(
+    {
+      available,
+      version: "1.0.0",
+      fileName: "JEE-AEGIS.apk",
+      downloadUrl: "/downloads/jee-aegis.apk",
+      expectedPath: "public/downloads/jee-aegis.apk",
+      sizeBytes,
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    }
+  );
 }

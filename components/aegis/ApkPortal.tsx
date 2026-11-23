@@ -1,14 +1,13 @@
 "use client";
 
 import {
-  AlertTriangle,
   CheckCircle2,
+  Clock,
   Download,
   Lock,
   RefreshCw,
   Shield,
   Smartphone,
-  Terminal,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -19,8 +18,6 @@ interface ApkStatus {
   downloadUrl: string;
   expectedPath: string;
   sizeBytes: number;
-  missingBuildTools: string[];
-  buildCommand: string;
 }
 
 const USER_JOURNEY_STEPS = [
@@ -69,8 +66,10 @@ export function ApkPortal() {
   }, []);
 
   useEffect(() => {
-    checkStatus();
+    void checkStatus();
   }, [checkStatus]);
+
+  const isAvailable = Boolean(status?.available && status.sizeBytes > 0);
 
   return (
     <div className="min-w-0 space-y-4 text-slate-100 sm:space-y-6">
@@ -79,78 +78,62 @@ export function ApkPortal() {
           <div className="min-w-0 space-y-2">
             <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200">
               <Smartphone className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">Native Android Kotlin • v{status?.version ?? "1.0.0"}</span>
+              <span className="truncate">
+                JEE AEGIS Android Connector
+                {isAvailable && status?.version ? ` • v${status.version}` : ""}
+              </span>
             </div>
             <h2 className="text-xl font-bold text-white sm:text-2xl">
-              JEE AEGIS Phone Connector APK
+              {isAvailable ? "JEE AEGIS Phone Connector APK" : "APK Build Pending"}
             </h2>
             <p className="max-w-2xl text-sm leading-relaxed text-slate-300">
-              Secure, permission-scoped bridge between your Android phone and JEE AEGIS.
-              Supports encrypted device credentials, FCM wakeup, recovery alarm, torch,
-              GPS telemetry, and MediaProjection screen sharing.
+              {isAvailable
+                ? "Secure, permission-scoped bridge between your Android phone and JEE AEGIS. Download and install the package on your Android device (Android 8.0+)."
+                : "The JEE AEGIS Android application is being prepared. Our automated build system will make the installation package available here shortly."}
             </p>
           </div>
 
-          <div className="flex w-full flex-col items-stretch gap-2 md:w-auto md:shrink-0 md:items-end">
-            {status?.available ? (
-              <a
-                href={status.downloadUrl}
-                download={status.fileName}
-                className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-indigo-500 md:w-auto"
-              >
-                <Download className="h-4 w-4 shrink-0" />
-                Download {status.fileName} ({(status.sizeBytes / (1024 * 1024)).toFixed(1)} MB)
-              </a>
-            ) : (
-              <div className="flex w-full flex-col items-stretch gap-2 md:w-auto md:items-end">
-                <button
-                  type="button"
-                  disabled
-                  className="inline-flex min-h-[46px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-5 py-3 text-sm font-semibold text-amber-200 md:w-auto"
+          <div className="flex w-full flex-col items-stretch gap-2.5 md:w-auto md:shrink-0 md:items-end">
+            {isAvailable && status ? (
+              <>
+                <a
+                  href="/downloads/jee-aegis.apk"
+                  download={status.fileName || "JEE-AEGIS.apk"}
+                  className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-indigo-500 md:w-auto"
                 >
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  APK Not Compiled Yet
-                </button>
+                  <Download className="h-4 w-4 shrink-0" />
+                  Download {status.fileName || "JEE-AEGIS.apk"}
+                </a>
+                <span className="text-xs text-slate-300 md:text-right">
+                  Version {status.version} • {(status.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                </span>
+              </>
+            ) : (
+              <div className="flex w-full flex-col items-stretch gap-2.5 md:w-auto md:items-end">
+                <div className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-2.5 text-xs font-semibold text-amber-200">
+                  <Clock className="h-4 w-4 shrink-0 text-amber-300" />
+                  <span>APK Build Pending — Trigger GitHub Action or Check Back Soon</span>
+                </div>
                 <button
                   type="button"
-                  onClick={checkStatus}
-                  className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-violet-300 hover:text-violet-200 md:min-h-0 md:border-0 md:bg-transparent md:p-0"
+                  onClick={() => void checkStatus()}
+                  disabled={loading}
+                  className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-60"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-                  Re-check build status
+                  Check Again
                 </button>
               </div>
             )}
-            <span className="break-all text-xs text-slate-400 md:text-right">
-              Expected file: <code className="text-violet-300">{status?.expectedPath ?? "public/downloads/jee-aegis.apk"}</code>
-            </span>
           </div>
         </div>
-
-        {!loading && status && !status.available && (
-          <div className="mt-4 min-w-0 rounded-xl border border-amber-400/30 bg-amber-950/30 p-3.5 text-xs text-amber-100 sm:mt-5 sm:p-4">
-            <div className="flex items-center gap-2 font-semibold text-amber-200">
-              <Terminal className="h-4 w-4 shrink-0" />
-              Why the download is unavailable on this server
-            </div>
-            <p className="mt-1 leading-relaxed text-amber-100/90">
-              This host is missing Android build tools:{" "}
-              <strong>{status.missingBuildTools.join(", ")}</strong>. Build the real APK on
-              your Windows/macOS machine with Android Studio (JDK 17 + Android SDK 35) and
-              copy it to <code className="break-all">public/downloads/jee-aegis.apk</code>:
-            </p>
-            <pre className="mt-2 max-w-full overflow-x-auto rounded-lg bg-slate-950/70 p-2.5 font-mono text-[11px] text-violet-200">
-              {`cd android\n.\\gradlew assembleDebug\ncopy app\\build\\outputs\\apk\\debug\\app-debug.apk ..\\public\\downloads\\jee-aegis.apk`}
-            </pre>
-          </div>
-        )}
       </div>
 
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-[#0f152d] p-4 sm:p-5">
           <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-white">
             <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            Onboarding Journey
+            Installation &amp; Onboarding Guide
           </h3>
           <ol className="space-y-2.5 text-sm text-slate-300">
             {USER_JOURNEY_STEPS.map((step, idx) => (

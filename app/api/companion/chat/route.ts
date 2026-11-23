@@ -11,9 +11,12 @@ interface CompanionRequestBody {
   message?: string;
   screenFrameBase64?: string;
   cameraFrameBase64?: string;
+  screenshotBase64?: string;
+  screenshotMimeType?: string;
   audioBase64?: string;
   audioMimeType?: string;
   history?: CompanionMessage[];
+  stream?: boolean;
 }
 
 function stripDataUrlPrefix(b64: string): string {
@@ -27,13 +30,15 @@ export async function POST(request: NextRequest) {
     const message = body.message?.trim() ?? "";
     const hasScreen = Boolean(body.screenFrameBase64);
     const hasCamera = Boolean(body.cameraFrameBase64);
+    const hasScreenshot = Boolean(body.screenshotBase64);
     const hasAudio = Boolean(body.audioBase64);
 
-    if (!message && !hasScreen && !hasCamera && !hasAudio) {
+    if (!message && !hasScreen && !hasCamera && !hasScreenshot && !hasAudio) {
       return NextResponse.json(
         {
           error: "MISSING_INPUT",
-          message: "Provide a message, voice recording, screen frame, or camera frame.",
+          message:
+            "Provide a message, voice recording, screenshot, screen frame, or camera frame.",
         },
         { status: 400 }
       );
@@ -41,21 +46,22 @@ export async function POST(request: NextRequest) {
 
     const historyText = Array.isArray(body.history)
       ? body.history
-          .slice(-8)
-          .map((m) => `${m.role === "user" ? "User" : "AEGIS"}: ${m.content}`)
+          .slice(-5)
+          .map((m) => `${m.role === "user" ? "User" : "AEGIS"}: ${m.content.slice(0, 400)}`)
           .join("\n")
       : "";
 
-    const systemInstruction = `You are JEE AEGIS Live Companion — a calm, practical, real-time multimodal AI assistant.
-Current visual context:
-- Screen sharing active: ${hasScreen ? "YES (screen frame attached)" : "NO"}
-- Camera sharing active: ${hasCamera ? "YES (camera frame attached)" : "NO"}
+    const systemInstruction = `You are JEE AEGIS Live Companion — a fast, practical multimodal AI assistant.
+Visual context attached:
+- Live Screen Share: ${hasScreen ? "YES" : "NO"}
+- Live Camera: ${hasCamera ? "YES" : "NO"}
+- Uploaded Screenshot: ${hasScreenshot ? "YES" : "NO"}
 
 Rules:
-1. If screen sharing is active, inspect the attached screen frame carefully to explain pages, UI elements, error messages, forms, or where the user should click.
-2. If camera sharing is active, inspect the attached camera frame to identify objects, read printed text/documents, or assist with accessibility.
-3. NEVER invent or guess what is on the user's screen or camera if no frame is attached. If they ask about their screen/camera when none is attached, clearly tell them to click "Share Screen" or "Camera" first.
-4. Keep responses concise, natural for spoken playback, and structured with clear step-by-step guidance when helping with tasks.`;
+1. If a screen share frame or uploaded screenshot is attached, inspect it carefully to explain the page, error messages, buttons, forms, or exact next steps.
+2. If a camera frame is attached, identify visible objects, read printed text/documents, or assist with accessibility.
+3. NEVER invent what is on the screen or camera if no image is attached. If none is attached and the user asks about their screen, tell them to use Camera, Upload Screenshot, or Share Screen.
+4. Be concise, clear, and natural for spoken playback.`;
 
     const parts: Part[] = [];
     if (hasScreen && body.screenFrameBase64) {
@@ -74,6 +80,14 @@ Rules:
         },
       });
     }
+    if (hasScreenshot && body.screenshotBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: body.screenshotMimeType || "image/jpeg",
+          data: stripDataUrlPrefix(body.screenshotBase64),
+        },
+      });
+    }
     if (hasAudio && body.audioBase64) {
       parts.push({
         inlineData: {
@@ -84,12 +98,12 @@ Rules:
     }
 
     const promptLines = [
-      historyText ? `Recent conversation:\n${historyText}` : "",
+      historyText ? `Recent context:\n${historyText}` : "",
       message
         ? `User request: ${message}`
         : hasAudio
         ? "Respond to the user's spoken audio request using the attached visual context if present."
-        : "Describe what you see in the attached visual frame and offer helpful next steps.",
+        : "Analyze the attached visual image/screenshot clearly and offer actionable guidance.",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -97,6 +111,59 @@ Rules:
     parts.push({ text: promptLines });
 
     const provider = getAIProvider();
+
+    if (body.stream) {
+      const { stream, modelUsed, provider: providerName } = await provider.generateStream({
+        contents: [{ role: "user", parts }],
+        config: { systemInstruction },
+      });
+
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream({
+        async start(controller) {
+          const sendEvent = (payload: Record<string, unknown>) => {
+            controller.enqueue(encoder.encode(JSON.stringify(payload) + "\n"));
+          };
+          sendEvent({
+            type: "meta",
+            modelUsed,
+            provider: providerName,
+            sawScreen: hasScreen,
+            sawCamera: hasCamera,
+            sawScreenshot: hasScreenshot,
+          });
+          try {
+            for await (const chunk of stream) {
+              const delta = chunk.text ?? "";
+              if (delta) {
+                sendEvent({ type: "delta", text: delta });
+              }
+            }
+            sendEvent({ type: "done" });
+          } catch (streamErr) {
+            sendEvent({
+              type: "error",
+              message:
+                streamErr instanceof Error
+                  ? streamErr.message
+                  : "Stream interrupted",
+            });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new NextResponse(readable, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
+
     const { response, modelUsed, provider: providerName } = await provider.generate({
       contents: [{ role: "user", parts }],
       config: {
@@ -112,6 +179,7 @@ Rules:
       provider: providerName,
       sawScreen: hasScreen,
       sawCamera: hasCamera,
+      sawScreenshot: hasScreenshot,
     });
   } catch (err) {
     if (err instanceof MissingApiKeyError) {
