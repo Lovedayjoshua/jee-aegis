@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import get_db
+from .database import get_db, set_rls_user_context
 from .models import Device, User
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -83,6 +83,7 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+    set_rls_user_context(db, user.id)
     return user
 
 
@@ -107,4 +108,5 @@ def get_authenticated_device(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid device credentials",
         )
+    set_rls_user_context(db, device.user_id)
     return device

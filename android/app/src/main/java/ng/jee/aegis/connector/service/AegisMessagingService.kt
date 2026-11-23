@@ -23,11 +23,16 @@ class AegisMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
+        val cleanToken = token.trim()
+        if (cleanToken.isEmpty()) return
         val store = SecureStore(applicationContext)
-        store.fcmToken = token
-        if (store.isRegistered()) {
+        store.fcmToken = cleanToken
+        if (store.isRegistered() && store.lastSyncedFcmToken != cleanToken) {
             serviceScope.launch {
-                AegisApiClient(store).refreshFcmToken(token)
+                val ok = AegisApiClient(store).refreshFcmToken(cleanToken)
+                if (ok) {
+                    store.lastSyncedFcmToken = cleanToken
+                }
             }
         }
     }

@@ -75,7 +75,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Location" />
+            android:text="Foreground Location" />
+
+        <Button
+            android:id="@+id/btnPermBgLocation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Background Location (Locate When Locked)" />
 
         <Button
             android:id="@+id/btnPermCamera"

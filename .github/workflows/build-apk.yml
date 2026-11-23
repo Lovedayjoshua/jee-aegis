@@ -2,6 +2,12 @@ name: JEE AEGIS Android APK Build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish compiled APK to the apk-latest GitHub Release"
+        required: false
+        default: "true"
+        type: string
   push:
     branches:
       - master
@@ -19,15 +25,13 @@ permissions:
 
 jobs:
   build-apk:
-    name: Build & Publish JEE AEGIS Debug APK
+    name: Build & Package JEE AEGIS APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@v4
@@ -65,7 +69,7 @@ jobs:
             echo "variant=debug" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify APK & Prepare Distribution
+      - name: Verify APK & Prepare Artifact
         id: verify_apk
         run: |
           APK_SOURCE="${{ steps.gradle_build.outputs.apk_path }}"
@@ -81,7 +85,6 @@ jobs:
           fi
 
           SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES / (1024 * 1024)}")
-          MAX_GIT_BYTES=$((95 * 1024 * 1024))
 
           mkdir -p public/downloads
           cp "$APK_SOURCE" public/downloads/jee-aegis.apk
@@ -89,17 +92,11 @@ jobs:
           echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
 
-          if [ "$SIZE_BYTES" -lt "$MAX_GIT_BYTES" ]; then
-            echo "commit_to_git=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "commit_to_git=false" >> "$GITHUB_OUTPUT"
-          fi
-
           {
             echo "## JEE AEGIS Android APK Build Summary"
-            echo "- **Status**: Build Succeeded"
+            echo "- **Status**: Build Succeeded (${{ steps.gradle_build.outputs.variant }})"
             echo "- **Source APK**: \`$APK_SOURCE\`"
-            echo "- **Published Path**: \`public/downloads/jee-aegis.apk\`"
+            echo "- **Artifact Name**: \`JEE-AEGIS-apk\` (\`jee-aegis.apk\`)"
             echo "- **Size**: ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -111,33 +108,18 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Commit & Push APK to Repository (< 95 MB)
-        if: steps.verify_apk.outputs.commit_to_git == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f public/downloads/jee-aegis.apk
-          if git diff --cached --quiet; then
-            echo "APK is unchanged; skipping commit."
-          else
-            git commit -m "chore(apk): publish compiled JEE AEGIS Android APK (${{ steps.verify_apk.outputs.size_mb }} MB) [skip ci]"
-            git pull --rebase origin "${GITHUB_REF_NAME}"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-
-      - name: Publish Large APK as GitHub Release Asset (>= 95 MB)
-        if: steps.verify_apk.outputs.commit_to_git == 'false'
+      - name: Publish APK to GitHub Release (apk-latest)
+        if: github.event.inputs.publish_release != 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          rm -f public/downloads/jee-aegis.apk
           TAG="apk-latest"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" android/app/build/outputs/apk/debug/app-debug.apk#JEE-AEGIS.apk --clobber
+            gh release upload "$TAG" public/downloads/jee-aegis.apk#JEE-AEGIS.apk --clobber
           else
-            gh release create "$TAG" android/app/build/outputs/apk/debug/app-debug.apk#JEE-AEGIS.apk \
+            gh release create "$TAG" public/downloads/jee-aegis.apk#JEE-AEGIS.apk \
               --title "JEE AEGIS Android Connector APK" \
-              --notes "Automated JEE AEGIS Android Connector APK build (${{ steps.verify_apk.outputs.size_mb }} MB)."
+              --notes "Automated JEE AEGIS Android Connector APK (${{ steps.gradle_build.outputs.variant }}, ${{ steps.verify_apk.outputs.size_mb }} MB)."
           fi
 
       - name: Collect Build Failure Diagnostics

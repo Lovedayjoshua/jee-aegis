@@ -273,6 +273,7 @@ def issue_command(
         payload=cmd.payload_json or {},
         expires_at_iso=expires_at.isoformat() + "Z",
         ttl_seconds=ttl_seconds,
+        device_id=device.id,
     )
     if fcm_result.get("invalid_token"):
         device.fcm_token = ""

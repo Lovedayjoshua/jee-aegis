@@ -40,6 +40,10 @@ class SecureStore(context: Context) {
         get() = prefs.getString("fcm_token", null)
         set(value) = prefs.edit().putString("fcm_token", value).apply()
 
+    var lastSyncedFcmToken: String?
+        get() = prefs.getString("last_synced_fcm_token", null)
+        set(value) = prefs.edit().putString("last_synced_fcm_token", value).apply()
+
     fun isRegistered(): Boolean = !deviceId.isNullOrBlank() && !deviceSecret.isNullOrBlank()
 
     @Synchronized
@@ -64,6 +68,7 @@ class SecureStore(context: Context) {
             .remove("device_id")
             .remove("device_secret")
             .remove("user_token")
+            .remove("last_synced_fcm_token")
             .remove("executed_command_ids")
             .apply()
     }

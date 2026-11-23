@@ -357,3 +357,182 @@ def test_fcm_token_refresh_deduplication_and_command_ttls(client: TestClient):
     assert dev["telemetry"]["latitude"] == 9.0765
     assert dev["telemetry"]["torch_on"] is True
     assert dev["telemetry"]["location_freshness"] == "fresh"
+
+
+def test_fcm_http_v1_dispatch_error_modes_and_payload(client: TestClient, monkeypatch):
+    from datetime import timedelta as td
+    from unittest.mock import MagicMock
+    import firebase_admin
+    from firebase_admin import exceptions as fb_exceptions, messaging
+    from app import fcm
+    from app.config import settings
+    from app.models import Device
+
+    fcm.reset_firebase_state_for_tests()
+
+    user_headers = _register_and_login(client, email="fcmv1@jee.ng")
+    reg = client.post(
+        "/api/v1/devices/register",
+        headers=user_headers,
+        json={"device_name": "Pixel 9", "fcm_token": "valid_fcm_token_abc"},
+    ).json()
+    device_id = reg["device_id"]
+
+    # 1. Missing credentials -> queue_only fallback
+    monkeypatch.setattr(settings, "firebase_service_account_json", "")
+    res_missing = fcm.dispatch_fcm_command(
+        fcm_token="valid_fcm_token_abc",
+        command_id="cmd-1",
+        command_type="TORCH_ON",
+        payload={},
+        expires_at_iso="2026-11-24T01:00:00Z",
+        ttl_seconds=300,
+        device_id=device_id,
+    )
+    assert res_missing["dispatched"] is False
+    assert res_missing["mode"] == "queue_only"
+    assert res_missing["reason"] == "fcm_not_configured"
+
+    # 2. Invalid credentials JSON -> invalid_credentials queue_fallback
+    monkeypatch.setattr(settings, "firebase_service_account_json", "{not-valid-json")
+    res_bad_cred = fcm.dispatch_fcm_command(
+        fcm_token="valid_fcm_token_abc",
+        command_id="cmd-2",
+        command_type="TORCH_ON",
+        payload={},
+        expires_at_iso="2026-11-24T01:00:00Z",
+        ttl_seconds=300,
+        device_id=device_id,
+    )
+    assert res_bad_cred["dispatched"] is False
+    assert res_bad_cred["mode"] == "queue_fallback"
+    assert res_bad_cred["reason"] == "invalid_credentials"
+
+    # 3. Valid credentials + singleton app reuse + data-only payload + TTL verification
+    valid_sa_json = (
+        '{"type":"service_account","project_id":"jee-aegis-prod",'
+        '"client_email":"fcm@jee-aegis-prod.iam.gserviceaccount.com",'
+        '"private_key":"-----BEGIN PRIVATE KEY-----\\nMII...\\n-----END PRIVATE KEY-----\\n"}'
+    )
+    monkeypatch.setattr(settings, "firebase_service_account_json", valid_sa_json)
+
+    fake_app = MagicMock(spec=firebase_admin.App)
+    init_calls = []
+
+    def fake_cert(data):
+        return data
+
+    def fake_get_app(name):
+        raise ValueError("not initialized")
+
+    def fake_init_app(cred, options=None, name=None):
+        init_calls.append((cred, options, name))
+        return fake_app
+
+    sent_messages = []
+
+    def fake_send(msg, app=None):
+        sent_messages.append((msg, app))
+        return "projects/jee-aegis-prod/messages/msg-101"
+
+    monkeypatch.setattr(fcm.credentials, "Certificate", fake_cert)
+    monkeypatch.setattr(fcm.firebase_admin, "get_app", fake_get_app)
+    monkeypatch.setattr(fcm.firebase_admin, "initialize_app", fake_init_app)
+    monkeypatch.setattr(fcm.messaging, "send", fake_send)
+
+    # Issue RING_START via API (300s TTL) and LOCATE_NOW (86400s TTL)
+    ring_res = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "RING_START"},
+    )
+    assert ring_res.status_code == 201
+    assert ring_res.json()["status"] == "sent"
+    assert ring_res.json()["fcm_dispatched"] is True
+
+    locate_res = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "LOCATE_NOW"},
+    )
+    assert locate_res.status_code == 201
+    assert locate_res.json()["status"] == "sent"
+
+    # Singleton Firebase app initialized only once across both dispatches
+    assert len(init_calls) == 1
+    assert init_calls[0][1] == {"projectId": "jee-aegis-prod"}
+    assert len(sent_messages) == 2
+
+    ring_msg, _ = sent_messages[0]
+    locate_msg, _ = sent_messages[1]
+    assert ring_msg.notification is None  # Strictly data-only
+    assert ring_msg.data["command_type"] == "RING_START"
+    assert ring_msg.data["device_id"] == device_id
+    assert ring_msg.data["command_id"] == ring_res.json()["id"]
+    assert ring_msg.android.priority == "high"
+    assert ring_msg.android.ttl == td(seconds=300)
+    assert locate_msg.android.ttl == td(seconds=86400)
+
+    # 4. Network failure -> queue_fallback while preserving command in pull queue
+    def fake_send_network_err(msg, app=None):
+        raise fb_exceptions.UnavailableError("FCM endpoint temporarily unreachable")
+
+    monkeypatch.setattr(fcm.messaging, "send", fake_send_network_err)
+    torch_res = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "TORCH_OFF"},
+    )
+    assert torch_res.status_code == 201
+    assert torch_res.json()["status"] == "pending"
+    assert torch_res.json()["fcm_dispatched"] is False
+
+    # 5. Unregistered / invalid FCM token -> clears device.fcm_token in DB
+    def fake_send_unregistered(msg, app=None):
+        raise messaging.UnregisteredError("Requested entity was not found (UNREGISTERED)")
+
+    monkeypatch.setattr(fcm.messaging, "send", fake_send_unregistered)
+    ring_stop_res = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "RING_STOP"},
+    )
+    assert ring_stop_res.status_code == 201
+    assert ring_stop_res.json()["status"] == "pending"
+
+    db = SessionLocal()
+    try:
+        dev_row = db.query(Device).filter(Device.id == device_id).first()
+        assert dev_row.fcm_token == ""
+    finally:
+        db.close()
+        fcm.reset_firebase_state_for_tests()
+
+
+def test_postgres_rls_session_context_and_cleanup():
+    from unittest.mock import MagicMock
+    from app.database import get_db, set_rls_user_context
+
+    # 1. Verify SQLite session records and cleans up rls_user_id on close
+    gen = get_db()
+    db = next(gen)
+    set_rls_user_context(db, "11111111-2222-3333-4444-555555555555")
+    assert db.info.get("rls_user_id") == "11111111-2222-3333-4444-555555555555"
+    try:
+        next(gen)
+    except StopIteration:
+        pass
+    assert "rls_user_id" not in db.info
+
+    # 2. Verify PostgreSQL dialect executes transaction-scoped set_config(..., true)
+    mock_pg_session = MagicMock()
+    mock_pg_session.info = {}
+    mock_bind = MagicMock()
+    mock_bind.dialect.name = "postgresql"
+    mock_pg_session.get_bind.return_value = mock_bind
+
+    set_rls_user_context(mock_pg_session, "aaaa1111-bbbb-2222-cccc-333333333333")
+    assert mock_pg_session.execute.called
+    sql_arg, params_arg = mock_pg_session.execute.call_args[0]
+    assert "set_config('app.current_user_id', :uid, true)" in str(sql_arg)
+    assert params_arg == {"uid": "aaaa1111-bbbb-2222-cccc-333333333333"}
