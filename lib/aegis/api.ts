@@ -43,17 +43,35 @@ async function apiFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutId =
+    typeof window !== "undefined"
+      ? window.setTimeout(() => controller.abort(), 15000)
+      : null;
 
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!res.ok) {
-    throw new Error(data.detail || data.error || `Request failed (${res.status})`);
+  try {
+    const res = await fetch(`${getApiBaseUrl()}${path}`, {
+      ...options,
+      headers,
+      signal: options.signal ?? controller.signal,
+    });
+
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!res.ok) {
+      throw new Error(data.detail || data.error || `Request failed (${res.status})`);
+    }
+    return data as T;
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Request timed out while contacting the AEGIS backend.");
+    }
+    throw err;
+  } finally {
+    if (timeoutId !== null && typeof window !== "undefined") {
+      window.clearTimeout(timeoutId);
+    }
   }
-  return data as T;
 }
 
 export async function registerUser(
@@ -85,17 +103,29 @@ export async function fetchDevices(token: string): Promise<AegisDevice[]> {
   return apiFetch<AegisDevice[]>("/api/v1/devices", { method: "GET" }, token);
 }
 
+const DEFAULT_COMMAND_TTLS: Record<AegisCommandType, number> = {
+  TORCH_ON: 300,
+  TORCH_OFF: 300,
+  RING_START: 300,
+  RING_STOP: 300,
+  LOCATE_NOW: 86400,
+  SYNC_STATUS: 300,
+  CAMERA_ASSIST_START: 300,
+  CAMERA_ASSIST_STOP: 300,
+};
+
 export async function issueDeviceCommand(
   token: string,
   deviceId: string,
   commandType: AegisCommandType,
-  ttlSeconds = 120
+  ttlSeconds?: number
 ): Promise<AegisCommand> {
+  const resolvedTtl = ttlSeconds ?? DEFAULT_COMMAND_TTLS[commandType] ?? 300;
   return apiFetch<AegisCommand>(
     `/api/v1/devices/${deviceId}/commands`,
     {
       method: "POST",
-      body: JSON.stringify({ command_type: commandType, ttl_seconds: ttlSeconds }),
+      body: JSON.stringify({ command_type: commandType, ttl_seconds: resolvedTtl }),
     },
     token
   );

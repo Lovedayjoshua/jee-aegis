@@ -38,13 +38,13 @@ export function DeviceMap({ telemetry, onLocateNow, busy }: DeviceMapProps) {
           <MapPin className="h-4 w-4 text-indigo-600" />
           <h3 className="text-sm font-semibold text-slate-900">Device Location</h3>
           <span
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${freshnessBadge}`}
+            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${freshnessBadge}`}
           >
             {freshness === "fresh"
-              ? "Fresh (<5m)"
+              ? "Current Location"
               : freshness === "stale"
-              ? "Last-Known (Stale)"
-              : "Unavailable"}
+              ? "Last Known Location"
+              : "Location Unavailable"}
           </span>
         </div>
 

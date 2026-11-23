@@ -9,21 +9,22 @@ from .routes_devices import _expire_stale_commands
 from .schemas import (
     CommandResponse,
     ConnectorCommandAckRequest,
+    ConnectorFcmTokenRequest,
     ConnectorHeartbeatRequest,
 )
 from .security import get_authenticated_device
 
 router = APIRouter(prefix="/api/v1/connector", tags=["connector"])
 
+TERMINAL_COMMAND_STATUSES = ("acked", "executed", "failed", "expired")
 
-@router.post("/heartbeat", status_code=status.HTTP_200_OK)
-def connector_heartbeat(
+
+def _record_telemetry(
+    db: Session,
+    device: Device,
     payload: ConnectorHeartbeatRequest,
-    device: Device = Depends(get_authenticated_device),
-    db: Session = Depends(get_db),
-):
-    now = utcnow_naive()
-    device.last_seen_at = now
+    now,
+) -> None:
     if payload.fcm_token is not None:
         device.fcm_token = payload.fcm_token.strip()
 
@@ -49,6 +50,30 @@ def connector_heartbeat(
         recorded_at=now,
     )
     db.add(telemetry)
+
+
+@router.post("/fcm-token", status_code=status.HTTP_200_OK)
+def refresh_fcm_token(
+    payload: ConnectorFcmTokenRequest,
+    device: Device = Depends(get_authenticated_device),
+    db: Session = Depends(get_db),
+):
+    now = utcnow_naive()
+    device.last_seen_at = now
+    device.fcm_token = payload.fcm_token.strip()
+    db.commit()
+    return {"status": "ok", "device_id": device.id}
+
+
+@router.post("/heartbeat", status_code=status.HTTP_200_OK)
+def connector_heartbeat(
+    payload: ConnectorHeartbeatRequest,
+    device: Device = Depends(get_authenticated_device),
+    db: Session = Depends(get_db),
+):
+    now = utcnow_naive()
+    device.last_seen_at = now
+    _record_telemetry(db, device, payload, now)
     db.commit()
     return {"status": "ok", "device_id": device.id, "server_time": now.isoformat() + "Z"}
 
@@ -66,7 +91,7 @@ def get_pending_commands(
         db.query(DeviceCommand)
         .filter(
             DeviceCommand.device_id == device.id,
-            DeviceCommand.status.in_(["pending", "dispatched"]),
+            DeviceCommand.status.in_(["pending", "sent", "dispatched", "delivered"]),
             DeviceCommand.expires_at >= now,
         )
         .order_by(DeviceCommand.created_at.asc())
@@ -74,9 +99,10 @@ def get_pending_commands(
     )
 
     for cmd in pending:
-        if cmd.status == "pending":
-            cmd.status = "dispatched"
-            cmd.dispatched_at = now
+        if cmd.status in ("pending", "sent", "dispatched"):
+            cmd.status = "delivered"
+            if not cmd.dispatched_at:
+                cmd.dispatched_at = now
         cmd.retry_count += 1
 
     db.commit()
@@ -117,7 +143,7 @@ def acknowledge_command(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Command not found.")
 
     now = utcnow_naive()
-    if cmd.status in ("acked", "failed", "expired"):
+    if cmd.status in TERMINAL_COMMAND_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Command already finalized with status '{cmd.status}'.",
@@ -133,21 +159,31 @@ def acknowledge_command(
     device.last_seen_at = now
     cmd.status = payload.status
     cmd.error_message = payload.error_message
-    cmd.acked_at = now
+    if not cmd.dispatched_at:
+        cmd.dispatched_at = now
+    if payload.status in TERMINAL_COMMAND_STATUSES:
+        cmd.acked_at = now
 
-    db.add(
-        AuditLog(
-            user_id=device.user_id,
-            device_id=device.id,
-            action=f"COMMAND_{payload.status.upper()}:{cmd.command_type}",
-            actor_type="device",
-            ip_address=request.client.host if request.client else "",
-            details_json={
-                "command_id": cmd.id,
-                "error_message": payload.error_message,
-            },
+    if payload.telemetry is not None:
+        _record_telemetry(db, device, payload.telemetry, now)
+
+    if payload.status in TERMINAL_COMMAND_STATUSES:
+        action_verb = "ACKED" if payload.status in ("acked", "executed") else payload.status.upper()
+        db.add(
+            AuditLog(
+                user_id=device.user_id,
+                device_id=device.id,
+                action=f"COMMAND_{action_verb}:{cmd.command_type}",
+                actor_type="device",
+                ip_address=request.client.host if request.client else "",
+                details_json={
+                    "command_id": cmd.id,
+                    "status": payload.status,
+                    "error_message": payload.error_message,
+                },
+            )
         )
-    )
+
     db.commit()
     db.refresh(cmd)
 

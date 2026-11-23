@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     device_online_threshold_seconds: int = 90
     location_fresh_threshold_seconds: int = 300
     fcm_server_key: str = ""
+    firebase_service_account_json: str = ""
 
 
 settings = Settings()

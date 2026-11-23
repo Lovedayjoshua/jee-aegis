@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db
-from .fcm import dispatch_fcm_command
+from .fcm import dispatch_fcm_command, resolve_command_ttl
 from .models import AuditLog, Device, DeviceCommand, DeviceTelemetry, User, utcnow_naive
 from .rate_limit import limit_command_requests
 from .schemas import (
@@ -29,7 +29,7 @@ def _expire_stale_commands(db: Session, device_id: str) -> None:
         db.query(DeviceCommand)
         .filter(
             DeviceCommand.device_id == device_id,
-            DeviceCommand.status.in_(["pending", "dispatched"]),
+            DeviceCommand.status.in_(["pending", "sent", "dispatched", "delivered", "executing"]),
             DeviceCommand.expires_at < now,
         )
         .all()
@@ -222,7 +222,38 @@ def issue_command(
     _expire_stale_commands(db, device.id)
 
     now = utcnow_naive()
-    expires_at = now + timedelta(seconds=payload.ttl_seconds)
+    ttl_seconds = resolve_command_ttl(payload.command_type, payload.ttl_seconds)
+
+    # Deduplicate rapid duplicate commands of the same type already in-flight within the last 10s
+    recent_duplicate = (
+        db.query(DeviceCommand)
+        .filter(
+            DeviceCommand.device_id == device.id,
+            DeviceCommand.command_type == payload.command_type,
+            DeviceCommand.status.in_(["pending", "sent", "dispatched", "delivered", "executing"]),
+            DeviceCommand.expires_at > now,
+            DeviceCommand.created_at >= now - timedelta(seconds=10),
+        )
+        .order_by(DeviceCommand.created_at.desc())
+        .first()
+    )
+    if recent_duplicate:
+        return CommandResponse(
+            id=recent_duplicate.id,
+            device_id=recent_duplicate.device_id,
+            command_type=recent_duplicate.command_type,
+            payload=recent_duplicate.payload_json or {},
+            status=recent_duplicate.status,
+            error_message=recent_duplicate.error_message,
+            retry_count=recent_duplicate.retry_count,
+            expires_at=recent_duplicate.expires_at,
+            created_at=recent_duplicate.created_at,
+            dispatched_at=recent_duplicate.dispatched_at,
+            acked_at=recent_duplicate.acked_at,
+            fcm_dispatched=recent_duplicate.dispatched_at is not None,
+        )
+
+    expires_at = now + timedelta(seconds=ttl_seconds)
 
     cmd = DeviceCommand(
         device_id=device.id,
@@ -241,9 +272,12 @@ def issue_command(
         command_type=cmd.command_type,
         payload=cmd.payload_json or {},
         expires_at_iso=expires_at.isoformat() + "Z",
+        ttl_seconds=ttl_seconds,
     )
+    if fcm_result.get("invalid_token"):
+        device.fcm_token = ""
     if fcm_result.get("dispatched"):
-        cmd.status = "dispatched"
+        cmd.status = "sent"
         cmd.dispatched_at = now
 
     db.add(
@@ -255,7 +289,7 @@ def issue_command(
             ip_address=request.client.host if request.client else "",
             details_json={
                 "command_id": cmd.id,
-                "ttl_seconds": payload.ttl_seconds,
+                "ttl_seconds": ttl_seconds,
                 "fcm": fcm_result,
             },
         )

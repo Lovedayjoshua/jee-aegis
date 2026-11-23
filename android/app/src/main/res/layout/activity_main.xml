@@ -121,10 +121,17 @@
         </LinearLayout>
 
         <Button
-            android:id="@+id/btnToggleScreenShare"
+            android:id="@+id/btnStopLocalAlarm"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
+            android:text="Stop Recovery Alarm" />
+
+        <Button
+            android:id="@+id/btnToggleScreenShare"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:text="Start Screen Share (MediaProjection)" />
     </LinearLayout>
 </ScrollView>

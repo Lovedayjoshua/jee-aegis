@@ -281,3 +281,79 @@ def test_auth_failures_and_health_db_check(client: TestClient):
         json={},
     )
     assert bad_hb.status_code == 401
+
+
+def test_fcm_token_refresh_deduplication_and_command_ttls(client: TestClient):
+    user_headers = _register_and_login(client, email="remote@jee.ng")
+    reg = client.post(
+        "/api/v1/devices/register",
+        headers=user_headers,
+        json={"device_name": "Infinix Note 40"},
+    ).json()
+    device_id = reg["device_id"]
+    device_headers = {
+        "X-Device-Id": device_id,
+        "X-Device-Secret": reg["device_secret"],
+    }
+
+    # 1. FCM token refresh endpoint
+    tok_res = client.post(
+        "/api/v1/connector/fcm-token",
+        headers=device_headers,
+        json={"fcm_token": "fcm_live_token_12345"},
+    )
+    assert tok_res.status_code == 200
+
+    # 2. Rapid duplicate command deduplication + default 300s TTL for TORCH_ON
+    c1 = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "TORCH_ON"},
+    )
+    c2 = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "TORCH_ON"},
+    )
+    assert c1.status_code == 201
+    assert c2.status_code == 201
+    assert c1.json()["id"] == c2.json()["id"]
+
+    # 3. Default 86400s (24h) TTL for LOCATE_NOW
+    loc_cmd = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "LOCATE_NOW"},
+    )
+    assert loc_cmd.status_code == 201
+
+    # 4. Connector polling marks commands as 'delivered'
+    pending = client.get("/api/v1/connector/commands/pending", headers=device_headers)
+    assert pending.status_code == 200
+    assert len(pending.json()) == 2
+    assert all(item["status"] == "delivered" for item in pending.json())
+
+    # 5. Connector acknowledges LOCATE_NOW with inline GPS telemetry
+    ack = client.post(
+        f"/api/v1/connector/commands/{loc_cmd.json()['id']}/ack",
+        headers=device_headers,
+        json={
+            "status": "acked",
+            "telemetry": {
+                "battery_level": 91,
+                "is_charging": True,
+                "network_type": "wifi",
+                "latitude": 9.0765,
+                "longitude": 7.3986,
+                "location_accuracy_m": 6.4,
+                "torch_on": True,
+            },
+        },
+    )
+    assert ack.status_code == 200
+    assert ack.json()["status"] == "acked"
+
+    dev = client.get(f"/api/v1/devices/{device_id}", headers=user_headers).json()
+    assert dev["telemetry"]["latitude"] == 9.0765
+    assert dev["telemetry"]["torch_on"] is True
+    assert dev["telemetry"]["location_freshness"] == "fresh"

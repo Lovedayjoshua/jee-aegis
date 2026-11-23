@@ -51,12 +51,23 @@ export interface AegisDevice {
   telemetry: TelemetrySnapshot | null;
 }
 
+export type AegisCommandStatus =
+  | "pending"
+  | "sent"
+  | "dispatched"
+  | "delivered"
+  | "executing"
+  | "executed"
+  | "acked"
+  | "failed"
+  | "expired";
+
 export interface AegisCommand {
   id: string;
   device_id: string;
   command_type: AegisCommandType;
   payload: Record<string, unknown>;
-  status: "pending" | "dispatched" | "acked" | "failed" | "expired";
+  status: AegisCommandStatus;
   error_message: string;
   retry_count: number;
   expires_at: string;

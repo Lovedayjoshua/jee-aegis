@@ -38,7 +38,8 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
   const [commands, setCommands] = useState<AegisCommand[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyCmd, setBusyCmd] = useState(false);
-  const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [activeCmdType, setActiveCmdType] = useState<AegisCommandType | null>(null);
+  const [banner, setBanner] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
 
   const loadDevices = useCallback(async () => {
     setLoading(true);
@@ -76,19 +77,37 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
     loadCommands();
   }, [loadCommands]);
 
+  // Auto-poll command status & telemetry every 3s while any command is in-flight
+  const hasInFlightCommand = commands.some((c) =>
+    ["pending", "sent", "dispatched", "delivered", "executing"].includes(c.status)
+  );
+
+  useEffect(() => {
+    if (!selectedId || !hasInFlightCommand) return;
+    const interval = window.setInterval(() => {
+      void loadCommands();
+      void loadDevices();
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [selectedId, hasInFlightCommand, loadCommands, loadDevices]);
+
   const selected = devices.find((d) => d.id === selectedId) ?? null;
 
   async function sendCommand(commandType: AegisCommandType) {
-    if (!selected) return;
+    if (!selected || busyCmd) return;
     setBusyCmd(true);
+    setActiveCmdType(commandType);
     setBanner(null);
     try {
-      const res = await issueDeviceCommand(token, selected.id, commandType, 120);
+      const res = await issueDeviceCommand(token, selected.id, commandType);
+      const isOnline = selected.is_online;
       setBanner({
-        kind: "ok",
-        text: `Command ${res.command_type} queued (${res.status}). Expires at ${new Date(
-          res.expires_at + "Z"
-        ).toLocaleTimeString()}.`,
+        kind: isOnline ? "ok" : "warn",
+        text: isOnline
+          ? `Command ${res.command_type} (${res.status.toUpperCase()}) sent to ${selected.device_name}. Waiting for device execution...`
+          : `${selected.device_name} is currently offline — ${res.command_type} queued until ${new Date(
+              res.expires_at + "Z"
+            ).toLocaleTimeString()} and will execute when the phone reconnects.`,
       });
       await Promise.all([loadCommands(), loadDevices()]);
     } catch (err) {
@@ -98,6 +117,7 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
       });
     } finally {
       setBusyCmd(false);
+      setActiveCmdType(null);
     }
   }
 
@@ -147,6 +167,8 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
           className={`rounded-xl border px-4 py-2.5 text-xs font-medium ${
             banner.kind === "ok"
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : banner.kind === "warn"
+              ? "border-amber-200 bg-amber-50 text-amber-900"
               : "border-rose-200 bg-rose-50 text-rose-800"
           }`}
         >
@@ -234,7 +256,9 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
                       Remote Device Recovery &amp; Assistance
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Commands expire after 120s if the phone remains offline.
+                      {activeCmdType
+                        ? `Sending ${activeCmdType}...`
+                        : "TTLs: Ring & Torch 300s • Locate 24h • Live status sync active"}
                     </p>
                   </div>
                   {!selected.is_revoked && (
@@ -380,14 +404,20 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
                         <div className="flex shrink-0 items-center gap-2">
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                              cmd.status === "acked"
+                              cmd.status === "acked" || cmd.status === "executed"
                                 ? "bg-emerald-100 text-emerald-700"
                                 : cmd.status === "failed" || cmd.status === "expired"
                                 ? "bg-rose-100 text-rose-700"
+                                : cmd.status === "delivered" || cmd.status === "executing"
+                                ? "bg-indigo-100 text-indigo-700"
                                 : "bg-amber-100 text-amber-700"
                             }`}
                           >
-                            {cmd.status}
+                            {cmd.status === "acked"
+                              ? "Executed"
+                              : cmd.status === "dispatched"
+                              ? "Sent"
+                              : cmd.status}
                           </span>
                           <span className="text-slate-400">
                             {new Date(cmd.created_at + "Z").toLocaleTimeString()}

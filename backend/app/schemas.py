@@ -88,7 +88,7 @@ class DeviceSummary(BaseModel):
 class CommandCreateRequest(BaseModel):
     command_type: AllowedCommandType
     payload: Dict[str, Any] = Field(default_factory=dict)
-    ttl_seconds: int = Field(default=120, ge=15, le=3600)
+    ttl_seconds: Optional[int] = Field(default=None, ge=15, le=86400)
 
 
 class CommandResponse(BaseModel):
@@ -104,6 +104,10 @@ class CommandResponse(BaseModel):
     dispatched_at: Optional[datetime] = None
     acked_at: Optional[datetime] = None
     fcm_dispatched: bool = False
+
+
+class ConnectorFcmTokenRequest(BaseModel):
+    fcm_token: str = Field(min_length=1, max_length=512)
 
 
 class ConnectorHeartbeatRequest(BaseModel):
@@ -122,8 +126,9 @@ class ConnectorHeartbeatRequest(BaseModel):
 
 
 class ConnectorCommandAckRequest(BaseModel):
-    status: Literal["acked", "failed"]
+    status: Literal["delivered", "executing", "executed", "acked", "failed"]
     error_message: str = Field(default="", max_length=500)
+    telemetry: Optional[ConnectorHeartbeatRequest] = None
 
 
 class AuditLogItem(BaseModel):

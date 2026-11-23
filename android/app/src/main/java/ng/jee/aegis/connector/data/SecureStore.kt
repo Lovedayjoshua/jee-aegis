@@ -42,11 +42,29 @@ class SecureStore(context: Context) {
 
     fun isRegistered(): Boolean = !deviceId.isNullOrBlank() && !deviceSecret.isNullOrBlank()
 
+    @Synchronized
+    fun isCommandExecuted(commandId: String): Boolean {
+        val recent = prefs.getString("executed_command_ids", "").orEmpty()
+            .split(",")
+            .filter { it.isNotBlank() }
+        return commandId in recent
+    }
+
+    @Synchronized
+    fun markCommandExecuted(commandId: String) {
+        val recent = prefs.getString("executed_command_ids", "").orEmpty()
+            .split(",")
+            .filter { it.isNotBlank() && it != commandId }
+            .takeLast(49) + commandId
+        prefs.edit().putString("executed_command_ids", recent.joinToString(",")).apply()
+    }
+
     fun clearDevice() {
         prefs.edit()
             .remove("device_id")
             .remove("device_secret")
             .remove("user_token")
+            .remove("executed_command_ids")
             .apply()
     }
 }

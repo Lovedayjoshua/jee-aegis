@@ -81,6 +81,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created
     ON audit_logs(user_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_devices_user_revoked
+    ON devices(user_id, is_revoked, last_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_commands_device_type_status
+    ON device_commands(device_id, command_type, status, expires_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_device_location
+    ON device_telemetry(device_id, location_timestamp DESC)
+    WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
+
 -- Row Level Security (RLS) for Supabase / PostgreSQL deployments
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;

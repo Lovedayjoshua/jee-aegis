@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnConnectDevice.setOnClickListener { registerDevice() }
         binding.btnSyncNow.setOnClickListener { triggerSync() }
         binding.btnDisconnect.setOnClickListener { disconnectDevice() }
+        binding.btnStopLocalAlarm.setOnClickListener { stopLocalAlarm() }
         binding.btnToggleScreenShare.setOnClickListener { toggleScreenShare() }
 
         // Granular permission requests: user grants or declines each feature individually
@@ -132,6 +133,14 @@ class MainActivity : AppCompatActivity() {
         }
         ContextCompat.startForegroundService(this, intent)
         Toast.makeText(this, "Syncing status & commands...", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopLocalAlarm() {
+        val intent = Intent(this, AegisForegroundService::class.java).apply {
+            action = AegisForegroundService.ACTION_STOP_ALARM
+        }
+        runCatching { startService(intent) }
+        Toast.makeText(this, "Alarm stopped", Toast.LENGTH_SHORT).show()
     }
 
     private fun disconnectDevice() {

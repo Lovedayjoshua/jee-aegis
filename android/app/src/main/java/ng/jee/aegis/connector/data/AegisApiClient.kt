@@ -2,6 +2,7 @@ package ng.jee.aegis.connector.data
 
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -21,9 +22,24 @@ class AegisApiClient(private val store: SecureStore) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
+
+    private suspend fun executeWithRetry(maxAttempts: Int = 3, block: () -> Boolean): Boolean {
+        var delayMs = 600L
+        for (attempt in 1..maxAttempts) {
+            val ok = runCatching { block() }.getOrDefault(false)
+            if (ok) return true
+            if (attempt < maxAttempts) {
+                delay(delayMs)
+                delayMs *= 2
+            }
+        }
+        return false
+    }
 
     suspend fun loginAndRegisterDevice(
         baseUrl: String,
@@ -79,6 +95,23 @@ class AegisApiClient(private val store: SecureStore) {
         }
     }
 
+    suspend fun refreshFcmToken(fcmToken: String): Boolean = withContext(Dispatchers.IO) {
+        val deviceId = store.deviceId ?: return@withContext false
+        val deviceSecret = store.deviceSecret ?: return@withContext false
+        val body = JSONObject().put("fcm_token", fcmToken).toString().toRequestBody(jsonMedia)
+
+        val req = Request.Builder()
+            .url("${store.apiBaseUrl}/api/v1/connector/fcm-token")
+            .addHeader("X-Device-Id", deviceId)
+            .addHeader("X-Device-Secret", deviceSecret)
+            .post(body)
+            .build()
+
+        executeWithRetry(2) {
+            client.newCall(req).execute().use { it.isSuccessful }
+        }
+    }
+
     suspend fun sendHeartbeat(payload: JSONObject): Boolean = withContext(Dispatchers.IO) {
         val deviceId = store.deviceId ?: return@withContext false
         val deviceSecret = store.deviceSecret ?: return@withContext false
@@ -90,9 +123,9 @@ class AegisApiClient(private val store: SecureStore) {
             .post(payload.toString().toRequestBody(jsonMedia))
             .build()
 
-        runCatching {
+        executeWithRetry(3) {
             client.newCall(req).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+        }
     }
 
     suspend fun fetchPendingCommands(): List<PendingCommand> = withContext(Dispatchers.IO) {
@@ -126,26 +159,34 @@ class AegisApiClient(private val store: SecureStore) {
         }.getOrDefault(emptyList())
     }
 
-    suspend fun ackCommand(commandId: String, status: String, errorMessage: String = ""): Boolean =
-        withContext(Dispatchers.IO) {
-            val deviceId = store.deviceId ?: return@withContext false
-            val deviceSecret = store.deviceSecret ?: return@withContext false
+    suspend fun ackCommand(
+        commandId: String,
+        status: String,
+        errorMessage: String = "",
+        telemetry: JSONObject? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        val deviceId = store.deviceId ?: return@withContext false
+        val deviceSecret = store.deviceSecret ?: return@withContext false
 
-            val body = JSONObject()
-                .put("status", status)
-                .put("error_message", errorMessage)
-                .toString()
-                .toRequestBody(jsonMedia)
-
-            val req = Request.Builder()
-                .url("${store.apiBaseUrl}/api/v1/connector/commands/$commandId/ack")
-                .addHeader("X-Device-Id", deviceId)
-                .addHeader("X-Device-Secret", deviceSecret)
-                .post(body)
-                .build()
-
-            runCatching {
-                client.newCall(req).execute().use { it.isSuccessful }
-            }.getOrDefault(false)
+        val bodyObj = JSONObject()
+            .put("status", status)
+            .put("error_message", errorMessage)
+        if (telemetry != null) {
+            bodyObj.put("telemetry", telemetry)
         }
+
+        val req = Request.Builder()
+            .url("${store.apiBaseUrl}/api/v1/connector/commands/$commandId/ack")
+            .addHeader("X-Device-Id", deviceId)
+            .addHeader("X-Device-Secret", deviceSecret)
+            .post(bodyObj.toString().toRequestBody(jsonMedia))
+            .build()
+
+        executeWithRetry(3) {
+            client.newCall(req).execute().use { resp ->
+                // 409 (already finalized) or 410 (expired) shouldn't be retried
+                resp.isSuccessful || resp.code == 409 || resp.code == 410
+            }
+        }
+    }
 }

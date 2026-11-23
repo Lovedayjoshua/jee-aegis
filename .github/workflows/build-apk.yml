@@ -41,17 +41,34 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Android Debug APK
+      - name: Build Android APK (Signed Release if secrets configured, else Debug)
+        id: gradle_build
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           sed -i 's/\r$//' android/gradlew
           chmod +x android/gradlew
           cd android
-          ./gradlew assembleDebug --stacktrace
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release-keystore.jks
+            export ANDROID_KEYSTORE_PATH="$PWD/release-keystore.jks"
+            ./gradlew assembleRelease --stacktrace
+            rm -f release-keystore.jks
+            echo "apk_path=android/app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_OUTPUT"
+            echo "variant=release" >> "$GITHUB_OUTPUT"
+          else
+            ./gradlew assembleDebug --stacktrace
+            echo "apk_path=android/app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_OUTPUT"
+            echo "variant=debug" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Verify APK & Prepare Distribution
         id: verify_apk
         run: |
-          APK_SOURCE="android/app/build/outputs/apk/debug/app-debug.apk"
+          APK_SOURCE="${{ steps.gradle_build.outputs.apk_path }}"
           if [ ! -f "$APK_SOURCE" ]; then
             echo "::error::Expected APK not found at $APK_SOURCE"
             exit 1
