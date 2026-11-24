@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: "Publish compiled APK to the apk-latest GitHub Release"
+        description: "Publish compiled APK to the apk-latest GitHub Release ('true' or 'false')"
         required: false
-        default: "true"
+        default: "false"
         type: string
   push:
     branches:
@@ -39,11 +39,66 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Android SDK (API 35 & Build-Tools 35.0.0)
+        run: |
+          set -e
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          mkdir -p "$SDK_ROOT"
+
+          SDKMANAGER=""
+          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          else
+            FOUND_SM="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1 || true)"
+            if [ -n "$FOUND_SM" ] && [ -x "$FOUND_SM" ]; then
+              SDKMANAGER="$FOUND_SM"
+            fi
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Installing Android SDK Command-Line Tools..."
+            CMDLINE_ZIP="/tmp/commandlinetools-linux.zip"
+            curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o "$CMDLINE_ZIP"
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            unzip -q -o "$CMDLINE_ZIP" -d "$SDK_ROOT/cmdline-tools"
+            rm -rf "$SDK_ROOT/cmdline-tools/latest"
+            mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            rm -f "$CMDLINE_ZIP"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure & Validate Firebase (google-services.json)
+        id: firebase_config
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
+            echo "firebase_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "firebase_status=Firebase-Enabled (google-services.json injected via GOOGLE_SERVICES_JSON_BASE64)" >> "$GITHUB_OUTPUT"
+            echo "Injected android/app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
+          elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "firebase_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "firebase_status=Firebase-Enabled (google-services.json injected via GOOGLE_SERVICES_JSON)" >> "$GITHUB_OUTPUT"
+            echo "Injected android/app/google-services.json from GOOGLE_SERVICES_JSON secret."
+          else
+            echo "firebase_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "firebase_status=NON-FIREBASE BUILD (No google-services.json — HTTPS Pull-Queue Fallback Only, FCM Push Disabled)" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Firebase Configuration Absent::Neither GOOGLE_SERVICES_JSON_BASE64 nor GOOGLE_SERVICES_JSON secret is configured. Building a NON-FIREBASE debug APK (HTTPS pull-queue fallback only; FCM push wakeup disabled)."
+          fi
 
       - name: Build Android APK (Signed Release if secrets configured, else Debug)
         id: gradle_build
@@ -69,6 +124,12 @@ jobs:
             echo "variant=debug" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Clean up temporary CI credentials
+        if: always()
+        run: |
+          rm -f android/release-keystore.jks
+          rm -f android/app/google-services.json
+
       - name: Verify APK & Prepare Artifact
         id: verify_apk
         run: |
@@ -85,19 +146,31 @@ jobs:
           fi
 
           SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES / (1024 * 1024)}")
+          FB_ENABLED="${{ steps.firebase_config.outputs.firebase_enabled }}"
+          FB_STATUS="${{ steps.firebase_config.outputs.firebase_status }}"
+          VARIANT="${{ steps.gradle_build.outputs.variant }}"
+
+          if [ "$FB_ENABLED" = "true" ]; then
+            BUILD_LABEL="${VARIANT}-firebase-enabled"
+          else
+            BUILD_LABEL="${VARIANT}-non-firebase-fallback"
+          fi
 
           mkdir -p public/downloads
           cp "$APK_SOURCE" public/downloads/jee-aegis.apk
 
           echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
+          echo "build_label=$BUILD_LABEL" >> "$GITHUB_OUTPUT"
 
           {
             echo "## JEE AEGIS Android APK Build Summary"
-            echo "- **Status**: Build Succeeded (${{ steps.gradle_build.outputs.variant }})"
+            echo "- **Build Variant**: \`$BUILD_LABEL\`"
+            echo "- **Firebase Status**: $FB_STATUS"
             echo "- **Source APK**: \`$APK_SOURCE\`"
             echo "- **Artifact Name**: \`JEE-AEGIS-apk\` (\`jee-aegis.apk\`)"
             echo "- **Size**: ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
+            echo "- **Release Published**: \`${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK as GitHub Actions Artifact
@@ -108,18 +181,20 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Publish APK to GitHub Release (apk-latest)
-        if: github.event.inputs.publish_release != 'false'
+      - name: Publish APK to GitHub Release (Explicit workflow_dispatch Only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="apk-latest"
+          NOTES="Automated JEE AEGIS Android Connector APK (${{ steps.verify_apk.outputs.build_label }}, ${{ steps.verify_apk.outputs.size_mb }} MB). Firebase Status: ${{ steps.firebase_config.outputs.firebase_status }}."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" public/downloads/jee-aegis.apk#JEE-AEGIS.apk --clobber
+            gh release edit "$TAG" --notes "$NOTES"
           else
             gh release create "$TAG" public/downloads/jee-aegis.apk#JEE-AEGIS.apk \
               --title "JEE AEGIS Android Connector APK" \
-              --notes "Automated JEE AEGIS Android Connector APK (${{ steps.gradle_build.outputs.variant }}, ${{ steps.verify_apk.outputs.size_mb }} MB)."
+              --notes "$NOTES"
           fi
 
       - name: Collect Build Failure Diagnostics
