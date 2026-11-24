@@ -9,6 +9,7 @@ export interface GitHubReleaseAsset {
   url?: string;
   name?: string;
   size?: number;
+  digest?: string;
   browser_download_url?: string;
   content_type?: string;
   updated_at?: string;
@@ -25,6 +26,9 @@ export interface GitHubReleasePayload {
 export interface ResolvedApkRelease {
   available: boolean;
   version: string;
+  versionCode: number;
+  commitSha: string | null;
+  sha256: string | null;
   buildMode: "firebase-enabled" | "non-firebase-fallback";
   releaseTag: string;
   releaseName: string | null;
@@ -56,7 +60,10 @@ export async function resolveGitHubApkRelease(
 ): Promise<ResolvedApkRelease> {
   const baseUnavailable: ResolvedApkRelease = {
     available: false,
-    version: "1.1.0",
+    version: "1.2.0",
+    versionCode: 3,
+    commitSha: null,
+    sha256: null,
     buildMode: "non-firebase-fallback",
     releaseTag: "apk-latest",
     releaseName: null,
@@ -136,19 +143,36 @@ export async function resolveGitHubApkRelease(
 
     const notesAndTitle = `${data.name ?? ""} ${data.body ?? ""}`;
     const versionMatch = notesAndTitle.match(/v?(\d+\.\d+\.\d+)/i);
-    const detectedVersion = versionMatch ? versionMatch[1] : "1.1.0";
+    const detectedVersion = versionMatch ? versionMatch[1] : "1.2.0";
+    const versionCodeMatch = notesAndTitle.match(/versionCode\s*=\s*(\d+)|build\s+(\d+)/i);
+    const detectedVersionCode = versionCodeMatch
+      ? Number(versionCodeMatch[1] || versionCodeMatch[2])
+      : detectedVersion === "1.2.0"
+      ? 3
+      : 2;
+    const commitMatch = notesAndTitle.match(/commit\s*=\s*([0-9a-f]{7,40})/i);
+    const detectedCommit = commitMatch ? commitMatch[1] : null;
+    const digestFromAsset =
+      typeof asset.digest === "string" && asset.digest.startsWith("sha256:")
+        ? asset.digest.slice("sha256:".length)
+        : null;
+    const shaMatch = notesAndTitle.match(/sha256\s*=\s*([0-9a-f]{64})/i);
+    const detectedSha256 = digestFromAsset || (shaMatch ? shaMatch[1] : null);
     const isFirebaseEnabled =
       /firebase-enabled/i.test(notesAndTitle) && !/non-firebase/i.test(notesAndTitle);
 
     return {
       available: true,
       version: detectedVersion,
+      versionCode: detectedVersionCode,
+      commitSha: detectedCommit,
+      sha256: detectedSha256,
       buildMode: isFirebaseEnabled ? "firebase-enabled" : "non-firebase-fallback",
       releaseTag: data.tag_name || "apk-latest",
       releaseName: data.name || "JEE AEGIS Android Connector APK",
-      publishedAt: data.published_at ?? asset.updated_at ?? null,
+      publishedAt: asset.updated_at ?? data.published_at ?? null,
       fileName: asset.name || EXPECTED_APK_ASSET_NAME,
-      downloadUrl: "/api/apk/download",
+      downloadUrl: `/api/apk/download?v=${encodeURIComponent(detectedVersion)}-${detectedVersionCode}-${asset.size}`,
       directDownloadUrl: asset.browser_download_url,
       assetApiUrl: typeof asset.url === "string" ? asset.url : null,
       sizeBytes: asset.size,
@@ -175,6 +199,9 @@ export async function GET(request: NextRequest) {
     {
       available: resolved.available,
       version: resolved.version,
+      versionCode: resolved.versionCode,
+      commitSha: resolved.commitSha,
+      sha256: resolved.sha256,
       buildMode: resolved.buildMode,
       releaseTag: resolved.releaseTag,
       releaseName: resolved.releaseName,

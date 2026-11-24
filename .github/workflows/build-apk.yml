@@ -6,7 +6,7 @@ on:
       publish_release:
         description: "Publish compiled APK to the apk-latest GitHub Release ('true' or 'false')"
         required: false
-        default: "false"
+        default: "true"
         type: string
   push:
     branches:
@@ -78,6 +78,27 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Cache Android Debug Keystore for Consistent Debug Signing
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: jee-aegis-debug-keystore-v1
+
+      - name: Ensure Deterministic Debug Keystore Exists
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
       - name: Configure & Validate Firebase (google-services.json)
         id: firebase_config
         env:
@@ -133,6 +154,7 @@ jobs:
       - name: Verify APK & Prepare Artifact
         id: verify_apk
         run: |
+          set -euo pipefail
           APK_SOURCE="${{ steps.gradle_build.outputs.apk_path }}"
           if [ ! -f "$APK_SOURCE" ]; then
             echo "::error::Expected APK not found at $APK_SOURCE"
@@ -146,6 +168,15 @@ jobs:
           fi
 
           SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES / (1024 * 1024)}")
+          SHA256=$(sha256sum "$APK_SOURCE" | awk '{print $1}')
+          COMMIT_SHA="${GITHUB_SHA}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+
+          VERSION_CODE=$(grep -E 'versionCode\s*=' android/app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          VERSION_NAME=$(grep -E 'versionName\s*=' android/app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE="${VERSION_CODE:-3}"
+          VERSION_NAME="${VERSION_NAME:-1.2.0}"
+
           FB_ENABLED="${{ steps.firebase_config.outputs.firebase_enabled }}"
           FB_STATUS="${{ steps.firebase_config.outputs.firebase_status }}"
           VARIANT="${{ steps.gradle_build.outputs.variant }}"
@@ -156,24 +187,46 @@ jobs:
             BUILD_LABEL="${VARIANT}-non-firebase-fallback"
           fi
 
+          if [ "$VARIANT" = "release" ]; then
+            SIGNING_MODE="Release Keystore (ANDROID_KEYSTORE_BASE64)"
+          else
+            SIGNING_MODE="Cached CI Debug Keystore (~/.android/debug.keystore)"
+          fi
+
+          SHOULD_PUBLISH="false"
+          INPUT_PUB="$(echo "${{ github.event.inputs.publish_release }}" | tr '[:upper:]' '[:lower:]')"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && { [ "$INPUT_PUB" = "true" ] || [ "$INPUT_PUB" = "1" ] || [ "$INPUT_PUB" = "yes" ]; }; then
+            SHOULD_PUBLISH="true"
+          fi
+
           mkdir -p public/downloads
           cp "$APK_SOURCE" public/downloads/jee-aegis.apk
 
           echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "build_label=$BUILD_LABEL" >> "$GITHUB_OUTPUT"
+          echo "signing_mode=$SIGNING_MODE" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$SHOULD_PUBLISH" >> "$GITHUB_OUTPUT"
 
           {
-            echo "## JEE AEGIS Android APK Build Summary (v1.1.0)"
-            echo "- **Version**: \`1.1.0\` (\`versionCode = 2\`)"
+            echo "## JEE AEGIS Android APK Build Summary (v${VERSION_NAME})"
+            echo "- **Source Commit SHA**: \`${COMMIT_SHA}\` (\`${SHORT_SHA}\`)"
+            echo "- **Version**: \`${VERSION_NAME}\` (\`versionCode = ${VERSION_CODE}\`)"
             echo "- **Package**: \`ng.jee.aegis.connector\`"
             echo "- **Production Backend**: \`https://jee-aegis.onrender.com\`"
             echo "- **Build Variant**: \`$BUILD_LABEL\`"
+            echo "- **Signing Mode**: \`$SIGNING_MODE\`"
             echo "- **Firebase Status**: $FB_STATUS"
             echo "- **Source APK**: \`$APK_SOURCE\`"
             echo "- **Artifact Name**: \`JEE-AEGIS-apk\` (\`jee-aegis.apk\`)"
             echo "- **Size**: ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
-            echo "- **Release Published**: \`${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true' }}\`"
+            echo "- **SHA256 Checksum**: \`${SHA256}\`"
+            echo "- **Publish to apk-latest Release**: \`${SHOULD_PUBLISH}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK as GitHub Actions Artifact
@@ -185,20 +238,66 @@ jobs:
           if-no-files-found: error
 
       - name: Publish APK to GitHub Release (Explicit workflow_dispatch Only)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true'
+        if: steps.verify_apk.outputs.should_publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           TAG="apk-latest"
-          NOTES="Automated JEE AEGIS Android Connector APK v1.1.0 (${{ steps.verify_apk.outputs.build_label }}, ${{ steps.verify_apk.outputs.size_mb }} MB). Firebase Status: ${{ steps.firebase_config.outputs.firebase_status }}."
+          APK_FILE="public/downloads/jee-aegis.apk"
+          VERSION_NAME="${{ steps.verify_apk.outputs.version_name }}"
+          VERSION_CODE="${{ steps.verify_apk.outputs.version_code }}"
+          COMMIT_SHA="${{ steps.verify_apk.outputs.commit_sha }}"
+          SHORT_SHA="${{ steps.verify_apk.outputs.short_sha }}"
+          SIZE_BYTES="${{ steps.verify_apk.outputs.size_bytes }}"
+          SIZE_MB="${{ steps.verify_apk.outputs.size_mb }}"
+          SHA256="${{ steps.verify_apk.outputs.sha256 }}"
+          BUILD_LABEL="${{ steps.verify_apk.outputs.build_label }}"
+          SIGNING_MODE="${{ steps.verify_apk.outputs.signing_mode }}"
+          FB_STATUS="${{ steps.firebase_config.outputs.firebase_status }}"
+
+          TITLE="JEE AEGIS Android Connector APK v${VERSION_NAME} (build ${VERSION_CODE})"
+          NOTES="Automated JEE AEGIS Android Connector APK v${VERSION_NAME} (versionCode=${VERSION_CODE}, commit=${SHORT_SHA}, ${BUILD_LABEL}, ${SIZE_MB} MB, sha256=${SHA256}). Signing: ${SIGNING_MODE}. Firebase Status: ${FB_STATUS}."
+
+          echo "Retargeting Git tag '$TAG' to commit $COMMIT_SHA..."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG" "$COMMIT_SHA"
+          git push origin "refs/tags/$TAG" --force
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" public/downloads/jee-aegis.apk#jee-aegis.apk --clobber
-            gh release edit "$TAG" --notes "$NOTES"
+            echo "Updating existing GitHub Release '$TAG'..."
+            gh release delete-asset "$TAG" jee-aegis.apk --yes >/dev/null 2>&1 || true
+            gh release delete-asset "$TAG" JEE-AEGIS.apk --yes >/dev/null 2>&1 || true
+            gh release upload "$TAG" "${APK_FILE}#jee-aegis.apk" --clobber
+            gh release edit "$TAG" \
+              --target "$COMMIT_SHA" \
+              --title "$TITLE" \
+              --notes "$NOTES"
           else
-            gh release create "$TAG" public/downloads/jee-aegis.apk#jee-aegis.apk \
-              --title "JEE AEGIS Android Connector APK v1.1.0" \
+            echo "Creating new GitHub Release '$TAG'..."
+            gh release create "$TAG" "${APK_FILE}#jee-aegis.apk" \
+              --target "$COMMIT_SHA" \
+              --title "$TITLE" \
               --notes "$NOTES"
           fi
+
+          echo "Verifying published asset on GitHub Release '$TAG'..."
+          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          REMOTE_SIZE="$(printf '%s' "$RELEASE_JSON" | python3 -c "import sys, json; data=json.load(sys.stdin); assets=[a for a in data.get('assets', []) if a.get('name')=='jee-aegis.apk' and a.get('state')=='uploaded']; print(assets[0]['size'] if assets else 0)")"
+          REMOTE_DIGEST="$(printf '%s' "$RELEASE_JSON" | python3 -c "import sys, json; data=json.load(sys.stdin); assets=[a for a in data.get('assets', []) if a.get('name')=='jee-aegis.apk' and a.get('state')=='uploaded']; print(assets[0].get('digest') or '' if assets else '')")"
+
+          if [ "$REMOTE_SIZE" != "$SIZE_BYTES" ]; then
+            echo "::error::Release asset size mismatch! Expected ${SIZE_BYTES} bytes, but GitHub Release asset has ${REMOTE_SIZE} bytes."
+            exit 1
+          fi
+
+          if [ -n "$REMOTE_DIGEST" ] && [ "$REMOTE_DIGEST" != "sha256:${SHA256}" ]; then
+            echo "::error::Release asset SHA256 mismatch! Expected sha256:${SHA256}, but GitHub Release asset has ${REMOTE_DIGEST}."
+            exit 1
+          fi
+
+          echo "Successfully published and verified jee-aegis.apk (v${VERSION_NAME}, versionCode=${VERSION_CODE}, commit=${SHORT_SHA}, size=${REMOTE_SIZE} bytes, sha256=${SHA256})."
 
       - name: Collect Build Failure Diagnostics
         if: failure()
