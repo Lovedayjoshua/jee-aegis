@@ -19,10 +19,19 @@ class SecureStore(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
-    var apiBaseUrl: String
-        get() = prefs.getString("api_base_url", BuildConfig.DEFAULT_API_BASE_URL)
-            ?: BuildConfig.DEFAULT_API_BASE_URL
-        set(value) = prefs.edit().putString("api_base_url", value.trimEnd('/')).apply()
+    init {
+        // Purge any legacy user-editable api_base_url setting so it can never override production config
+        if (prefs.contains("api_base_url")) {
+            prefs.edit().remove("api_base_url").apply()
+        }
+    }
+
+    val apiBaseUrl: String
+        get() = BuildConfig.DEFAULT_API_BASE_URL.trimEnd('/')
+
+    var sessionExpiredReason: String?
+        get() = prefs.getString("session_expired_reason", null)
+        set(value) = prefs.edit().putString("session_expired_reason", value).apply()
 
     var userToken: String?
         get() = prefs.getString("user_token", null)
@@ -63,6 +72,15 @@ class SecureStore(context: Context) {
         prefs.edit().putString("executed_command_ids", recent.joinToString(",")).apply()
     }
 
+    @Synchronized
+    fun markSessionExpired(reason: String) {
+        prefs.edit()
+            .remove("device_secret")
+            .remove("user_token")
+            .putString("session_expired_reason", reason)
+            .apply()
+    }
+
     fun clearDevice() {
         prefs.edit()
             .remove("device_id")
@@ -70,6 +88,7 @@ class SecureStore(context: Context) {
             .remove("user_token")
             .remove("last_synced_fcm_token")
             .remove("executed_command_ids")
+            .remove("session_expired_reason")
             .apply()
     }
 }

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 interface ApkStatus {
   available: boolean;
   version: string;
+  buildMode?: "firebase-enabled" | "non-firebase-fallback";
   fileName: string;
   downloadUrl: string;
   expectedPath: string;
@@ -105,7 +106,10 @@ export function ApkPortal() {
                   Download {status.fileName || "jee-aegis.apk"}
                 </a>
                 <span className="text-xs text-slate-300 md:text-right">
-                  Version {status.version} • {(status.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                  Version {status.version} • {(status.sizeBytes / (1024 * 1024)).toFixed(1)} MB •{" "}
+                  {status.buildMode === "firebase-enabled"
+                    ? "Firebase Push + 4s Pull-Queue"
+                    : "4s HTTPS Pull-Queue Mode"}
                 </span>
               </>
             ) : (

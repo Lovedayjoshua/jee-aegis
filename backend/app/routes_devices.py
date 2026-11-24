@@ -128,20 +128,53 @@ def register_device(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    now = utcnow_naive()
     raw_secret = generate_device_secret()
-    device = Device(
-        user_id=current_user.id,
-        device_name=payload.device_name.strip(),
-        manufacturer=payload.manufacturer.strip(),
-        model=payload.model.strip(),
-        android_version=payload.android_version.strip(),
-        app_version=payload.app_version.strip(),
-        fcm_token=payload.fcm_token.strip(),
-        device_secret_hash=hash_device_secret(raw_secret),
-        last_seen_at=utcnow_naive(),
+    clean_name = payload.device_name.strip()
+    clean_mfg = payload.manufacturer.strip()
+    clean_model = payload.model.strip()
+    clean_android = payload.android_version.strip()
+    clean_app_ver = payload.app_version.strip()
+    clean_fcm = payload.fcm_token.strip()
+
+    # Reuse existing non-revoked device entry for the same user + phone identity
+    # so re-signing in on the same physical phone keeps the same device_id.
+    existing = (
+        db.query(Device)
+        .filter(
+            Device.user_id == current_user.id,
+            Device.device_name == clean_name,
+            Device.manufacturer == clean_mfg,
+            Device.model == clean_model,
+            Device.is_revoked.is_(False),
+        )
+        .order_by(Device.created_at.desc())
+        .first()
     )
-    db.add(device)
-    db.flush()
+
+    if existing:
+        device = existing
+        device.android_version = clean_android or device.android_version
+        device.app_version = clean_app_ver or device.app_version
+        if clean_fcm:
+            device.fcm_token = clean_fcm
+        device.device_secret_hash = hash_device_secret(raw_secret)
+        device.last_seen_at = now
+        db.flush()
+    else:
+        device = Device(
+            user_id=current_user.id,
+            device_name=clean_name,
+            manufacturer=clean_mfg,
+            model=clean_model,
+            android_version=clean_android,
+            app_version=clean_app_ver,
+            fcm_token=clean_fcm,
+            device_secret_hash=hash_device_secret(raw_secret),
+            last_seen_at=now,
+        )
+        db.add(device)
+        db.flush()
 
     db.add(
         AuditLog(

@@ -10,6 +10,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
@@ -33,10 +34,15 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import ng.jee.aegis.connector.MainActivity
 import ng.jee.aegis.connector.R
@@ -49,6 +55,10 @@ import kotlin.coroutines.resume
 class AegisForegroundService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val commandMutex = Mutex()
+    private val ackedToServerCommandIds = mutableSetOf<String>()
+    private var pollingJob: Job? = null
+
     private lateinit var store: SecureStore
     private lateinit var api: AegisApiClient
     private var cameraManager: CameraManager? = null
@@ -74,10 +84,57 @@ class AegisForegroundService : Service() {
         store = SecureStore(this)
         api = AegisApiClient(store)
         ensureNotificationChannel()
-        runCatching {
-            startForeground(NOTIFICATION_ID, buildNotification("AEGIS Connector Active"))
-        }
+        startForegroundSafely("AEGIS Connector Active")
         initTorchSupport()
+        startCommandPollingLoop()
+    }
+
+    private fun computeEligibleForegroundServiceTypes(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
+        var mask = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+
+        if (hasLocationPermission()) {
+            mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val hasCam = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasCam) {
+                mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            }
+        }
+        return mask
+    }
+
+    private fun startForegroundSafely(contentText: String) {
+        val notification = buildNotification(contentText)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val startedFull = runCatching {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    computeEligibleForegroundServiceTypes()
+                )
+                true
+            }.getOrDefault(false)
+
+            if (!startedFull) {
+                // Fallback for Android 14/15 background start restrictions when CAMERA/LOCATION cannot be promoted from background
+                runCatching {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    )
+                }
+            }
+        } else {
+            runCatching { startForeground(NOTIFICATION_ID, notification) }
+        }
     }
 
     private fun initTorchSupport() {
@@ -92,7 +149,49 @@ class AegisForegroundService : Service() {
         }
     }
 
+    /**
+     * Continuous HTTPS pull-queue polling loop (every 4 seconds) so commands
+     * execute promptly even on non-Firebase APK builds or when FCM push is delayed.
+     */
+    private fun startCommandPollingLoop() {
+        if (pollingJob?.isActive == true) return
+        pollingJob = scope.launch(Dispatchers.IO) {
+            var tick = 0
+            while (isActive) {
+                if (store.isRegistered()) {
+                    // 1. Poll pending commands first so command execution is never delayed by telemetry/location
+                    runCatching {
+                        val pending = api.fetchPendingCommands()
+                        val myDeviceId = store.deviceId
+                        for (cmd in pending) {
+                            if (cmd.deviceId.isNotBlank() && !myDeviceId.isNullOrBlank() && cmd.deviceId != myDeviceId) {
+                                continue
+                            }
+                            handleCommandWithWakeLock(cmd.id, cmd.commandType)
+                        }
+                    }
+
+                    // 2. Send periodic telemetry snapshot (~28s interval) in an isolated block
+                    if (tick % 7 == 0) {
+                        runCatching {
+                            sendTelemetrySnapshot(forceLocation = false)
+                        }
+                    }
+                    tick++
+                } else if (!store.sessionExpiredReason.isNullOrBlank()) {
+                    runCatching {
+                        updateNotification("Session expired or device revoked — tap to sign in")
+                    }
+                }
+                delay(4_000L)
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundSafely(currentNotificationStatusText())
+        startCommandPollingLoop()
+
         val action = intent?.action
         val commandId = intent?.getStringExtra(EXTRA_COMMAND_ID)
         val commandType = intent?.getStringExtra(EXTRA_COMMAND_TYPE)
@@ -124,27 +223,49 @@ class AegisForegroundService : Service() {
         return START_STICKY
     }
 
-    private suspend fun handleCommandWithWakeLock(commandId: String, commandType: String) {
-        if (store.isCommandExecuted(commandId)) {
-            return
-        }
+    private fun currentNotificationStatusText(): String = when {
+        alarmActive -> "Recovery Alarm Active — Tap Stop Alarm to silence"
+        cameraAssistActive -> "Camera Assistance Active — Visible Owner Session"
+        torchOn -> "AEGIS Active • Flashlight ON"
+        else -> "AEGIS Connector Active"
+    }
 
-        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-        val wakeLock = pm?.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "JeeAegis::CommandExecWakeLock"
-        )
-        try {
-            wakeLock?.acquire(30_000L)
-            handleCommand(commandId, commandType)
-        } finally {
-            if (wakeLock?.isHeld == true) {
-                runCatching { wakeLock.release() }
+    private suspend fun handleCommandWithWakeLock(commandId: String, commandType: String) {
+        commandMutex.withLock {
+            if (store.isCommandExecuted(commandId)) {
+                // If hardware action already ran locally (e.g. via FCM or prior poll) but server
+                // still returned it, re-send the terminal acknowledgement without re-triggering hardware.
+                if (commandId !in ackedToServerCommandIds) {
+                    val acked = runCatching {
+                        api.ackCommand(commandId, "acked", telemetry = buildTelemetryPayload(null))
+                    }.getOrDefault(false)
+                    if (acked) {
+                        ackedToServerCommandIds.add(commandId)
+                    }
+                }
+                return
+            }
+
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val wakeLock = pm?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "JeeAegis::CommandExecWakeLock"
+            )
+            try {
+                wakeLock?.acquire(30_000L)
+                handleCommand(commandId, commandType)
+            } finally {
+                if (wakeLock?.isHeld == true) {
+                    runCatching { wakeLock.release() }
+                }
             }
         }
     }
 
     private suspend fun handleCommand(commandId: String, commandType: String) {
+        // Report 'executing' before performing the hardware operation
+        runCatching { api.ackCommand(commandId, "executing") }
+
         var freshLocation: Location? = null
 
         val result: Result<Unit> = runCatching {
@@ -156,7 +277,7 @@ class AegisForegroundService : Service() {
                 "LOCATE_NOW" -> {
                     freshLocation = resolveCurrentLocation(forceHighAccuracy = true)
                     if (freshLocation == null) {
-                        error("Location unavailable: check GPS setting or location permission")
+                        error("Location unavailable: enable GPS and grant Location permission in AEGIS Connector")
                     }
                 }
                 "CAMERA_ASSIST_START" -> startCameraAssist()
@@ -171,10 +292,16 @@ class AegisForegroundService : Service() {
         val telemetry = buildTelemetryPayload(freshLocation)
         if (result.isSuccess) {
             store.markCommandExecuted(commandId)
-            api.ackCommand(commandId, "acked", telemetry = telemetry)
+            val acked = api.ackCommand(commandId, "acked", telemetry = telemetry)
+            if (acked) {
+                ackedToServerCommandIds.add(commandId)
+            }
         } else {
             val errMsg = result.exceptionOrNull()?.message ?: "Execution failed"
-            api.ackCommand(commandId, "failed", errorMessage = errMsg, telemetry = telemetry)
+            val acked = api.ackCommand(commandId, "failed", errorMessage = errMsg, telemetry = telemetry)
+            if (acked) {
+                ackedToServerCommandIds.add(commandId)
+            }
         }
     }
 
@@ -203,13 +330,15 @@ class AegisForegroundService : Service() {
                 audioManager.requestAudioFocus(req)
                 audioFocusRequest = req
             }
-            // Raise alarm stream volume to 85% of max within Android's standard volume controls
-            runCatching {
-                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-                val targetVol = (maxVol * 0.85).toInt().coerceAtLeast(1)
-                if (currentVol < targetVol) {
-                    audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVol, 0)
+            // Respect Do Not Disturb / silent mode — only raise alarm stream volume in normal ringer mode
+            if (audioManager.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+                runCatching {
+                    val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                    val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                    val targetVol = (maxVol * 0.85).toInt().coerceAtLeast(1)
+                    if (currentVol < targetVol) {
+                        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVol, 0)
+                    }
                 }
             }
         }
@@ -221,11 +350,15 @@ class AegisForegroundService : Service() {
             prepare()
             start()
         }
+        if (!player.isPlaying) {
+            player.release()
+            error("Alarm audio playback could not start (blocked by system audio policy or Do Not Disturb)")
+        }
 
         alarmPlayer = player
         alarmActive = true
         isAlarmPlaying = true
-        updateNotification("Recovery Alarm Active — Tap Stop Alarm to silence")
+        updateNotification(currentNotificationStatusText())
     }
 
     private fun stopAlarmInternal() {
@@ -253,10 +386,7 @@ class AegisForegroundService : Service() {
 
     private fun stopAlarm() {
         stopAlarmInternal()
-        updateNotification(
-            if (cameraAssistActive) "Camera Assistance Active (Owner Visible)"
-            else "AEGIS Connector Active"
-        )
+        updateNotification(currentNotificationStatusText())
     }
 
     private fun setTorch(enabled: Boolean) {
@@ -270,13 +400,10 @@ class AegisForegroundService : Service() {
                 .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
         } ?: error("No camera flash unit found")
 
-        if (torchOn == enabled) {
-            return
-        }
-
         try {
             cm.setTorchMode(id, enabled)
             torchOn = enabled
+            updateNotification(currentNotificationStatusText())
         } catch (e: CameraAccessException) {
             val reason = when (e.reason) {
                 CameraAccessException.CAMERA_IN_USE -> "Flashlight unavailable: camera is currently in use"
@@ -293,17 +420,16 @@ class AegisForegroundService : Service() {
     private fun startCameraAssist() {
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
-        if (!granted) error("Camera permission not granted by owner")
+        if (!granted) {
+            error("Camera permission not granted on device — tap Camera in AEGIS Connector to allow")
+        }
         cameraAssistActive = true
-        updateNotification("Camera Assistance Active — Visible Owner Session")
+        startForegroundSafely(currentNotificationStatusText())
     }
 
     private fun stopCameraAssist() {
         cameraAssistActive = false
-        updateNotification(
-            if (alarmActive) "Recovery Alarm Active — Tap Stop Alarm to silence"
-            else "AEGIS Connector Active"
-        )
+        updateNotification(currentNotificationStatusText())
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -500,6 +626,7 @@ class AegisForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        pollingJob?.cancel()
         stopAlarmInternal()
         runCatching { cameraManager?.unregisterTorchCallback(torchCallback) }
         scope.cancel()

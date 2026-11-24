@@ -4,6 +4,7 @@ import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import ng.jee.aegis.connector.BuildConfig
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -14,6 +15,7 @@ import java.util.concurrent.TimeUnit
 
 data class PendingCommand(
     val id: String,
+    val deviceId: String,
     val commandType: String,
     val expiresAt: String
 )
@@ -41,14 +43,17 @@ class AegisApiClient(private val store: SecureStore) {
         return false
     }
 
+    private fun extractErrorDetail(raw: String, fallback: String): String {
+        val detail = runCatching { JSONObject(raw).optString("detail") }.getOrDefault("")
+        return if (detail.isNotBlank()) detail else fallback
+    }
+
     suspend fun loginAndRegisterDevice(
-        baseUrl: String,
         email: String,
         password: String,
         deviceName: String
     ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            store.apiBaseUrl = baseUrl
+        try {
             val loginBody = JSONObject()
                 .put("email", email)
                 .put("password", password)
@@ -62,7 +67,10 @@ class AegisApiClient(private val store: SecureStore) {
 
             val token = client.newCall(loginReq).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) error("Sign-in failed (${resp.code}): $raw")
+                if (!resp.isSuccessful) {
+                    val msg = extractErrorDetail(raw, "Invalid email or password (${resp.code})")
+                    return@withContext Result.failure(IllegalStateException("Sign-in failed: $msg"))
+                }
                 JSONObject(raw).getString("access_token")
             }
             store.userToken = token
@@ -72,7 +80,7 @@ class AegisApiClient(private val store: SecureStore) {
                 .put("manufacturer", Build.MANUFACTURER)
                 .put("model", Build.MODEL)
                 .put("android_version", Build.VERSION.RELEASE)
-                .put("app_version", "1.0.0")
+                .put("app_version", BuildConfig.VERSION_NAME)
                 .put("fcm_token", store.fcmToken.orEmpty())
                 .toString()
                 .toRequestBody(jsonMedia)
@@ -85,13 +93,23 @@ class AegisApiClient(private val store: SecureStore) {
 
             client.newCall(regReq).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) error("Device registration failed (${resp.code}): $raw")
+                if (!resp.isSuccessful) {
+                    val msg = extractErrorDetail(raw, "Registration rejected (${resp.code})")
+                    return@withContext Result.failure(IllegalStateException("Device registration failed: $msg"))
+                }
                 val json = JSONObject(raw)
                 val deviceId = json.getString("device_id")
                 store.deviceId = deviceId
                 store.deviceSecret = json.getString("device_secret")
-                deviceId
+                store.sessionExpiredReason = null
+                Result.success(deviceId)
             }
+        } catch (e: Exception) {
+            Result.failure(
+                IllegalStateException(
+                    "Unable to reach JEE AEGIS cloud service. Check your internet connection and try again."
+                )
+            )
         }
     }
 
@@ -124,7 +142,13 @@ class AegisApiClient(private val store: SecureStore) {
             .build()
 
         executeWithRetry(3) {
-            client.newCall(req).execute().use { it.isSuccessful }
+            client.newCall(req).execute().use { resp ->
+                if (resp.code == 401) {
+                    store.markSessionExpired("Session expired or device revoked — sign in again")
+                    return@use true
+                }
+                resp.isSuccessful
+            }
         }
     }
 
@@ -141,6 +165,10 @@ class AegisApiClient(private val store: SecureStore) {
 
         runCatching {
             client.newCall(req).execute().use { resp ->
+                if (resp.code == 401) {
+                    store.markSessionExpired("Session expired or device revoked — sign in again")
+                    return@use emptyList()
+                }
                 if (!resp.isSuccessful) return@use emptyList()
                 val arr = JSONArray(resp.body?.string().orEmpty())
                 buildList {
@@ -149,6 +177,7 @@ class AegisApiClient(private val store: SecureStore) {
                         add(
                             PendingCommand(
                                 id = obj.getString("id"),
+                                deviceId = obj.optString("device_id", deviceId),
                                 commandType = obj.getString("command_type"),
                                 expiresAt = obj.getString("expires_at")
                             )

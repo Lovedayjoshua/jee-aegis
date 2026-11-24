@@ -36,22 +36,22 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <div className="mx-auto w-full max-w-md rounded-2xl border border-violet-500/25 bg-[#0f152d] p-4 text-slate-100 shadow-xl sm:p-6">
       <div className="mb-4 flex items-center gap-3 sm:mb-5">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white sm:h-11 sm:w-11">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-900/40 sm:h-11 sm:w-11">
           <ShieldCheck className="h-5 w-5 sm:h-6 sm:w-6" />
         </div>
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-slate-900 sm:text-lg">
+          <h2 className="text-base font-semibold text-white sm:text-lg">
             {mode === "login" ? "Sign in to JEE AEGIS" : "Create JEE AEGIS Account"}
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-400">
             Manage connected Android devices &amp; security audit logs
           </p>
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-medium">
+      <div className="mb-4 grid grid-cols-2 rounded-xl border border-white/10 bg-[#080c1d] p-1 text-sm font-medium">
         <button
           type="button"
           onClick={() => {
@@ -59,7 +59,9 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
             setError(null);
           }}
           className={`min-h-[40px] rounded-lg py-1.5 transition ${
-            mode === "login" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"
+            mode === "login"
+              ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+              : "text-slate-300 hover:text-white"
           }`}
         >
           Sign In
@@ -71,7 +73,9 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
             setError(null);
           }}
           className={`min-h-[40px] rounded-lg py-1.5 transition ${
-            mode === "register" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"
+            mode === "register"
+              ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+              : "text-slate-300 hover:text-white"
           }`}
         >
           Create Account
@@ -79,7 +83,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+        <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-950/50 px-3 py-2 text-xs text-rose-200">
           {error}
         </div>
       )}
@@ -89,7 +93,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
           <div>
             <label
               htmlFor="aegis-full-name"
-              className="mb-1 block text-xs font-medium text-slate-700"
+              className="mb-1 block text-xs font-medium text-slate-300"
             >
               Full Name
             </label>
@@ -104,7 +108,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Adebayo Chinedu"
-                className="min-h-[44px] w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-base text-slate-900 focus:border-indigo-500 focus:outline-none sm:text-sm"
+                className="min-h-[44px] w-full rounded-xl border border-white/10 bg-[#141b38] py-2.5 pl-9 pr-3 text-base text-white placeholder-slate-500 focus:border-violet-500 focus:outline-none sm:text-sm"
               />
             </div>
           </div>
@@ -113,7 +117,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
         <div>
           <label
             htmlFor="aegis-email"
-            className="mb-1 block text-xs font-medium text-slate-700"
+            className="mb-1 block text-xs font-medium text-slate-300"
           >
             Email Address
           </label>
@@ -130,7 +134,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="min-h-[44px] w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-base text-slate-900 focus:border-indigo-500 focus:outline-none sm:text-sm"
+              className="min-h-[44px] w-full rounded-xl border border-white/10 bg-[#141b38] py-2.5 pl-9 pr-3 text-base text-white placeholder-slate-500 focus:border-violet-500 focus:outline-none sm:text-sm"
             />
           </div>
         </div>
@@ -138,7 +142,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
         <div>
           <label
             htmlFor="aegis-password"
-            className="mb-1 block text-xs font-medium text-slate-700"
+            className="mb-1 block text-xs font-medium text-slate-300"
           >
             Password
           </label>
@@ -153,7 +157,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={mode === "register" ? "Minimum 8 characters" : "••••••••"}
-              className="min-h-[44px] w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-base text-slate-900 focus:border-indigo-500 focus:outline-none sm:text-sm"
+              className="min-h-[44px] w-full rounded-xl border border-white/10 bg-[#141b38] py-2.5 pl-9 pr-3 text-base text-white placeholder-slate-500 focus:border-violet-500 focus:outline-none sm:text-sm"
             />
           </div>
         </div>
@@ -161,7 +165,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
         <button
           type="submit"
           disabled={loading}
-          className="flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+          className="flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-indigo-500 disabled:opacity-60"
         >
           {loading && <Loader2 className="h-4 w-4 animate-spin" />}
           {mode === "login" ? "Sign In" : "Create Account"}

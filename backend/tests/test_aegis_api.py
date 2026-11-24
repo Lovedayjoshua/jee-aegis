@@ -536,3 +536,139 @@ def test_postgres_rls_session_context_and_cleanup():
     sql_arg, params_arg = mock_pg_session.execute.call_args[0]
     assert "set_config('app.current_user_id', :uid, true)" in str(sql_arg)
     assert params_arg == {"uid": "aaaa1111-bbbb-2222-cccc-333333333333"}
+
+
+def test_command_execution_lifecycle_intermediate_and_terminal_statuses(client: TestClient):
+    user_headers = _register_and_login(client, email="lifecycle@jee.ng")
+    reg = client.post(
+        "/api/v1/devices/register",
+        headers=user_headers,
+        json={"device_name": "TECNO Camon 30"},
+    ).json()
+    device_id = reg["device_id"]
+    device_headers = {
+        "X-Device-Id": device_id,
+        "X-Device-Secret": reg["device_secret"],
+    }
+
+    # 1. Queue TORCH_ON without FCM token (HTTPS pull-queue fallback)
+    torch_cmd = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "TORCH_ON"},
+    )
+    assert torch_cmd.status_code == 201
+    torch_id = torch_cmd.json()["id"]
+    assert torch_cmd.json()["status"] == "pending"
+
+    # 2. First poll marks command as 'delivered'; re-poll while non-terminal still returns it
+    poll_1 = client.get("/api/v1/connector/commands/pending", headers=device_headers)
+    assert poll_1.status_code == 200
+    assert len(poll_1.json()) == 1
+    assert poll_1.json()[0]["id"] == torch_id
+    assert poll_1.json()[0]["status"] == "delivered"
+
+    poll_2 = client.get("/api/v1/connector/commands/pending", headers=device_headers)
+    assert poll_2.status_code == 200
+    assert len(poll_2.json()) == 1
+    assert poll_2.json()[0]["id"] == torch_id
+
+    # 3. Intermediate transition to 'executing' succeeds and does not finalize command yet
+    exec_res = client.post(
+        f"/api/v1/connector/commands/{torch_id}/ack",
+        headers=device_headers,
+        json={"status": "executing"},
+    )
+    assert exec_res.status_code == 200
+    assert exec_res.json()["status"] == "executing"
+    assert exec_res.json()["acked_at"] is None
+
+    # 4. Final hardware execution acknowledgement ('acked') with inline telemetry finalizes command
+    ack_res = client.post(
+        f"/api/v1/connector/commands/{torch_id}/ack",
+        headers=device_headers,
+        json={
+            "status": "acked",
+            "telemetry": {
+                "battery_level": 77,
+                "is_charging": False,
+                "network_type": "wifi",
+                "torch_on": True,
+                "alarm_active": False,
+            },
+        },
+    )
+    assert ack_res.status_code == 200
+    assert ack_res.json()["status"] == "acked"
+    assert ack_res.json()["acked_at"] is not None
+
+    # Command is now removed from pending queue
+    poll_3 = client.get("/api/v1/connector/commands/pending", headers=device_headers)
+    assert poll_3.status_code == 200
+    assert poll_3.json() == []
+
+    # 5. Hardware failure path: CAMERA_ASSIST_START -> executing -> failed with error_message
+    cam_cmd = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=user_headers,
+        json={"command_type": "CAMERA_ASSIST_START"},
+    )
+    assert cam_cmd.status_code == 201
+    cam_id = cam_cmd.json()["id"]
+
+    fail_res = client.post(
+        f"/api/v1/connector/commands/{cam_id}/ack",
+        headers=device_headers,
+        json={
+            "status": "failed",
+            "error_message": "CAMERA permission not granted on Android device",
+        },
+    )
+    assert fail_res.status_code == 200
+    assert fail_res.json()["status"] == "failed"
+    assert fail_res.json()["error_message"] == "CAMERA permission not granted on Android device"
+    assert fail_res.json()["acked_at"] is not None
+
+
+def test_device_re_registration_deduplication_and_cors_preflight(client: TestClient):
+    # 1. Verify production Vercel origin is allowed by CORS preflight
+    cors_res = client.options(
+        "/api/v1/auth/login",
+        headers={
+            "Origin": "https://jee-aegis-mv4i-roan.vercel.app",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert cors_res.status_code == 200
+    assert (
+        cors_res.headers.get("access-control-allow-origin")
+        == "https://jee-aegis-mv4i-roan.vercel.app"
+    )
+
+    # 2. Verify re-registering the same physical phone reuses device_id and rotates secret
+    user_headers = _register_and_login(client, email="samephone@jee.ng")
+    payload = {
+        "device_name": "Samsung SM-A556E",
+        "manufacturer": "Samsung",
+        "model": "SM-A556E",
+        "android_version": "14",
+        "app_version": "1.1.0",
+    }
+    reg_1 = client.post("/api/v1/devices/register", headers=user_headers, json=payload).json()
+    reg_2 = client.post("/api/v1/devices/register", headers=user_headers, json=payload).json()
+
+    assert reg_1["device_id"] == reg_2["device_id"]
+    assert reg_1["device_secret"] != reg_2["device_secret"]
+
+    # Old secret is invalidated; new secret works
+    old_headers = {"X-Device-Id": reg_1["device_id"], "X-Device-Secret": reg_1["device_secret"]}
+    new_headers = {"X-Device-Id": reg_2["device_id"], "X-Device-Secret": reg_2["device_secret"]}
+    assert client.get("/api/v1/connector/commands/pending", headers=old_headers).status_code == 401
+    assert client.get("/api/v1/connector/commands/pending", headers=new_headers).status_code == 200
+
+    # Dashboard device list contains exactly 1 active entry for this phone
+    devices = client.get("/api/v1/devices", headers=user_headers).json()
+    assert len(devices) == 1
+    assert devices[0]["id"] == reg_2["device_id"]
+
+

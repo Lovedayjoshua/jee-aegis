@@ -45,7 +45,7 @@ export function StudySpaceWorkspace() {
       </div>
 
       {/* Preserved full educational workspace (scenarios, PDF/camera upload, KaTeX, drills, history) */}
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-50 shadow-xl">
+      <div className="overflow-hidden rounded-2xl border border-violet-500/20 bg-[#0b1024] shadow-2xl">
         <StudyCoachWorkspace />
       </div>
     </div>

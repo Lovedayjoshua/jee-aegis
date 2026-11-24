@@ -126,7 +126,15 @@ class ConnectorHeartbeatRequest(BaseModel):
 
 
 class ConnectorCommandAckRequest(BaseModel):
-    status: Literal["delivered", "executing", "executed", "acked", "failed"]
+    status: Literal[
+        "retrieved",
+        "delivered",
+        "executing",
+        "completed",
+        "executed",
+        "acked",
+        "failed",
+    ]
     error_message: str = Field(default="", max_length=500)
     telemetry: Optional[ConnectorHeartbeatRequest] = None
 

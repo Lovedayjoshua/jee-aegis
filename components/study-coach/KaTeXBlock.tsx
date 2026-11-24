@@ -26,14 +26,14 @@ export function KaTeXBlock({ snippet, kind }: KaTeXBlockProps) {
   if (renderedHtml) {
     return (
       <div
-        className="overflow-x-auto rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900"
+        className="overflow-x-auto rounded-lg border border-white/10 bg-[#141b38] px-3 py-2 text-slate-100"
         dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />
     );
   }
 
   return (
-    <pre className="overflow-x-auto rounded-md border border-slate-200 bg-slate-900 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">
+    <pre className="overflow-x-auto rounded-lg border border-white/10 bg-[#080c1d] px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">
       <code>{snippet}</code>
     </pre>
   );

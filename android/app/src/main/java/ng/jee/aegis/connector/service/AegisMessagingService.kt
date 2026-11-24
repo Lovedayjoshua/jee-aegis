@@ -44,6 +44,8 @@ class AegisMessagingService : FirebaseMessagingService() {
 
         val commandId = message.data["command_id"] ?: return
         val commandType = message.data["command_type"] ?: return
+        val targetDeviceId = message.data["device_id"]
+        if (!targetDeviceId.isNullOrBlank() && targetDeviceId != store.deviceId) return
         if (store.isCommandExecuted(commandId)) return
 
         val intent = Intent(applicationContext, AegisForegroundService::class.java).apply {

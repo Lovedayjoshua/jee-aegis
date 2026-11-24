@@ -14,7 +14,7 @@ services:
       - key: JWT_EXPIRE_MINUTES
         value: "1440"
       - key: CORS_ORIGINS
-        sync: false
+        value: "https://jee-aegis-mv4i-roan.vercel.app,http://localhost:3000,http://127.0.0.1:3000"
       - key: DEVICE_ONLINE_THRESHOLD_SECONDS
         value: "90"
       - key: FCM_SERVER_KEY

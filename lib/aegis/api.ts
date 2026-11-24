@@ -12,7 +12,7 @@ const TOKEN_KEY = "jee_aegis_token_v1";
 export function getApiBaseUrl(): string {
   return (
     process.env.NEXT_PUBLIC_AEGIS_API_URL?.replace(/\/$/, "") ||
-    "http://localhost:8000"
+    "https://jee-aegis.onrender.com"
   );
 }
 
@@ -59,12 +59,18 @@ async function apiFetch<T>(
     const text = await res.text();
     const data = text ? JSON.parse(text) : {};
     if (!res.ok) {
+      if (res.status === 401 && token) {
+        setStoredToken(null);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("aegis:session-expired"));
+        }
+      }
       throw new Error(data.detail || data.error || `Request failed (${res.status})`);
     }
     return data as T;
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new Error("Request timed out while contacting the AEGIS backend.");
+      throw new Error("Request timed out while contacting the AEGIS cloud service.");
     }
     throw err;
   } finally {

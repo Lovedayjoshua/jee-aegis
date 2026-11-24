@@ -16,7 +16,7 @@ from .security import get_authenticated_device
 
 router = APIRouter(prefix="/api/v1/connector", tags=["connector"])
 
-TERMINAL_COMMAND_STATUSES = ("acked", "executed", "failed", "expired")
+TERMINAL_COMMAND_STATUSES = ("acked", "executed", "completed", "failed", "expired")
 
 
 def _record_telemetry(
@@ -91,7 +91,9 @@ def get_pending_commands(
         db.query(DeviceCommand)
         .filter(
             DeviceCommand.device_id == device.id,
-            DeviceCommand.status.in_(["pending", "sent", "dispatched", "delivered"]),
+            DeviceCommand.status.in_(
+                ["pending", "sent", "dispatched", "retrieved", "delivered", "executing"]
+            ),
             DeviceCommand.expires_at >= now,
         )
         .order_by(DeviceCommand.created_at.asc())
@@ -168,7 +170,11 @@ def acknowledge_command(
         _record_telemetry(db, device, payload.telemetry, now)
 
     if payload.status in TERMINAL_COMMAND_STATUSES:
-        action_verb = "ACKED" if payload.status in ("acked", "executed") else payload.status.upper()
+        action_verb = (
+            "ACKED"
+            if payload.status in ("acked", "executed", "completed")
+            else payload.status.upper()
+        )
         db.add(
             AuditLog(
                 user_id=device.user_id,

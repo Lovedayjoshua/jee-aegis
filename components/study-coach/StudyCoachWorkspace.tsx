@@ -592,32 +592,32 @@ export function StudyCoachWorkspace() {
   );
 
   return (
-    <div className="flex min-h-0 flex-col bg-slate-50 text-slate-900">
+    <div className="flex min-h-0 flex-col bg-[#0b1024] text-slate-100">
       {/* Top Academic Header */}
-      <header className="border-b border-slate-200 bg-white px-3 py-2.5 sm:px-6 sm:py-3">
+      <header className="border-b border-white/10 bg-[#0f152d] px-3 py-2.5 sm:px-6 sm:py-3">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-700 text-white shadow-xs sm:h-9 sm:w-9">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-900/40 sm:h-9 sm:w-9">
                 <GraduationCap className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <h1 className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">
-                    SocraticLab
+                  <h1 className="text-sm font-bold tracking-tight text-white sm:text-base">
+                    AEGIS Study Coach
                   </h1>
-                  <span className="truncate rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-blue-800">
+                  <span className="truncate rounded border border-violet-400/30 bg-violet-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-violet-200">
                     {activeModelBadge}
                   </span>
                 </div>
-                <p className="truncate text-[11px] text-slate-500 sm:text-xs">
+                <p className="truncate text-[11px] text-slate-400 sm:text-xs">
                   Multimodal Exam &amp; Lab Practical Study Coach
                 </p>
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-xs font-semibold text-slate-700 lg:hidden">
-              <Clock className="h-3.5 w-3.5 text-slate-500" />
+            <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#141b38] px-2 py-1.5 font-mono text-xs font-semibold text-slate-200 lg:hidden">
+              <Clock className="h-3.5 w-3.5 text-violet-400" />
               <span>
                 {mode === "exam"
                   ? formatTimer(examRemaining)
@@ -638,8 +638,8 @@ export function StudyCoachWorkspace() {
                   onClick={() => handleSelectScenario(item.id)}
                   className={`min-h-[38px] shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                     active
-                      ? "border-blue-700 bg-blue-50 text-blue-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      ? "border-violet-400/50 bg-violet-500/20 text-violet-100"
+                      : "border-white/10 bg-[#141b38] text-slate-300 hover:border-white/20 hover:bg-white/10"
                   } disabled:opacity-60`}
                 >
                   {item.title}
@@ -650,14 +650,14 @@ export function StudyCoachWorkspace() {
 
           {/* Mode Toggle + Timer + End & Grade */}
           <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+            <div className="inline-flex rounded-lg border border-white/10 bg-[#080c1d] p-0.5">
               <button
                 type="button"
                 onClick={() => setMode("coach")}
                 className={`min-h-[36px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                   mode === "coach"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
+                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                    : "text-slate-300 hover:text-white"
                 }`}
               >
                 Practice Coach
@@ -667,16 +667,16 @@ export function StudyCoachWorkspace() {
                 onClick={() => setMode("exam")}
                 className={`min-h-[36px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                   mode === "exam"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
+                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                    : "text-slate-300 hover:text-white"
                 }`}
               >
                 Timed Exam
               </button>
             </div>
 
-            <div className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs font-semibold text-slate-700 lg:flex">
-              <Clock className="h-3.5 w-3.5 text-slate-500" />
+            <div className="hidden items-center gap-1.5 rounded-lg border border-white/10 bg-[#141b38] px-2.5 py-1.5 font-mono text-xs font-semibold text-slate-200 lg:flex">
+              <Clock className="h-3.5 w-3.5 text-violet-400" />
               <span>
                 {mode === "exam"
                   ? formatTimer(examRemaining)
@@ -687,9 +687,9 @@ export function StudyCoachWorkspace() {
             <button
               type="button"
               onClick={handleEndAndGrade}
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100"
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/15 px-3 py-1.5 text-xs font-semibold text-rose-200 transition-colors hover:bg-rose-500/25"
             >
-              <Square className="h-3 w-3 fill-current text-red-600" />
+              <Square className="h-3 w-3 fill-current text-rose-400" />
               End &amp; Grade
             </button>
           </div>
@@ -698,10 +698,10 @@ export function StudyCoachWorkspace() {
 
       {/* Error Banner */}
       {errorBanner && (
-        <div className="border-b border-red-200 bg-red-50 px-4 py-2.5 sm:px-6">
-          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 text-sm text-red-800">
+        <div className="border-b border-rose-500/30 bg-rose-950/60 px-4 py-2.5 sm:px-6">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 text-sm text-rose-200">
             <div className="flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
               <span>{errorBanner}</span>
             </div>
             <div className="flex items-center gap-3">
@@ -709,7 +709,7 @@ export function StudyCoachWorkspace() {
                 <button
                   type="button"
                   onClick={() => void analyzeSnapshot()}
-                  className="rounded-md bg-red-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-800"
+                  className="rounded-md bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500"
                 >
                   Retry
                 </button>
@@ -717,7 +717,7 @@ export function StudyCoachWorkspace() {
               <button
                 type="button"
                 onClick={() => setErrorBanner(null)}
-                className="text-xs font-semibold text-red-700 underline hover:text-red-900"
+                className="text-xs font-semibold text-rose-300 underline hover:text-white"
               >
                 Dismiss
               </button>
@@ -731,14 +731,14 @@ export function StudyCoachWorkspace() {
         {/* Left Stage */}
         <section className="flex min-w-0 flex-col gap-3 sm:gap-3.5 lg:col-span-7 xl:col-span-8">
           {/* Scenario Task Strip */}
-          <div className="flex flex-col gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4 sm:py-3">
+          <div className="flex flex-col gap-2.5 rounded-xl border border-white/10 bg-[#0f152d] px-3.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4 sm:py-3">
             <div className="flex min-w-0 items-start gap-2.5">
-              <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+              <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-violet-400" />
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                <p className="text-[11px] font-semibold tracking-wider text-violet-300 uppercase">
                   {scenario.subject}
                 </p>
-                <p className="text-sm font-medium leading-snug text-slate-900">
+                <p className="text-sm font-medium leading-snug text-white">
                   {scenario.sampleProblem}
                 </p>
               </div>
@@ -754,7 +754,7 @@ export function StudyCoachWorkspace() {
                 className="hidden"
               />
               {pdfAttachment ? (
-                <div className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">
+                <div className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-violet-400/30 bg-violet-500/20 px-3 py-1 text-xs font-medium text-violet-100">
                   <FileText className="h-3.5 w-3.5 shrink-0" />
                   <span className="max-w-[160px] truncate">
                     {pdfAttachment.name}
@@ -765,7 +765,7 @@ export function StudyCoachWorkspace() {
                       setPdfAttachment(null);
                       if (pdfInputRef.current) pdfInputRef.current.value = "";
                     }}
-                    className="rounded-full p-1 hover:bg-blue-200"
+                    className="rounded-full p-1 hover:bg-violet-500/30"
                     aria-label="Remove attached PDF"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -775,9 +775,9 @@ export function StudyCoachWorkspace() {
                 <button
                   type="button"
                   onClick={() => pdfInputRef.current?.click()}
-                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-white/10 bg-[#141b38] px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-white/10"
                 >
-                  <Paperclip className="h-3.5 w-3.5" />
+                  <Paperclip className="h-3.5 w-3.5 text-violet-300" />
                   Attach Lab/Exam PDF
                 </button>
               )}
@@ -785,7 +785,7 @@ export function StudyCoachWorkspace() {
           </div>
 
           {/* Live Camera / Screen Preview */}
-          <div className="relative flex min-h-[220px] flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-950 shadow-xs sm:min-h-[340px] lg:min-h-[460px]">
+          <div className="relative flex min-h-[220px] flex-1 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#070a18] shadow-xs sm:min-h-[340px] lg:min-h-[460px]">
             <video
               ref={videoRef}
               autoPlay
@@ -799,12 +799,12 @@ export function StudyCoachWorkspace() {
               <div
                 className={`inline-flex max-w-full items-center gap-2 truncate rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold backdrop-blur-xs sm:px-3 sm:text-[11px] ${
                   isAnalyzing
-                    ? "border-amber-400/40 bg-slate-900/85 text-amber-300"
+                    ? "border-amber-400/40 bg-[#0f152d]/90 text-amber-300"
                     : isRecordingVoice
-                      ? "border-red-400/50 bg-slate-900/85 text-red-300"
+                      ? "border-rose-400/50 bg-[#0f152d]/90 text-rose-300"
                       : isCameraActive
-                        ? "border-emerald-400/40 bg-slate-900/80 text-emerald-300"
-                        : "border-slate-600/60 bg-slate-900/80 text-slate-300"
+                        ? "border-emerald-400/40 bg-[#0f152d]/90 text-emerald-300"
+                        : "border-white/15 bg-[#0f152d]/90 text-slate-300"
                 }`}
               >
                 <span
@@ -812,10 +812,10 @@ export function StudyCoachWorkspace() {
                     isAnalyzing
                       ? "animate-pulse bg-amber-400"
                       : isRecordingVoice
-                        ? "animate-ping bg-red-400"
+                        ? "animate-ping bg-rose-400"
                         : isCameraActive
-                          ? "bg-emerald-400"
-                          : "bg-slate-400"
+                           ? "bg-emerald-400"
+                           : "bg-slate-400"
                   }`}
                 />
                 <span className="truncate">
@@ -835,7 +835,7 @@ export function StudyCoachWorkspace() {
                 <button
                   type="button"
                   onClick={() => startVideoStream(videoSource, facingMode)}
-                  className="min-h-[44px] rounded-xl bg-blue-700 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-800"
+                  className="min-h-[44px] rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-violet-900/30 hover:from-violet-500 hover:to-indigo-500"
                 >
                   Enable {videoSource === "webcam" ? "Webcam" : "Screen Share"}
                 </button>
@@ -845,19 +845,19 @@ export function StudyCoachWorkspace() {
 
           {/* Latest Spoken Coach Reply Banner */}
           {latestReply && (
-            <div className="flex items-start justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-3">
+            <div className="flex items-start justify-between gap-3 rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-3">
               <div className="space-y-0.5">
-                <p className="text-[11px] font-bold tracking-wider text-blue-800 uppercase">
+                <p className="text-[11px] font-bold tracking-wider text-violet-300 uppercase">
                   Coach Socratic Feedback
                 </p>
-                <p className="text-sm leading-relaxed text-slate-900">
+                <p className="text-sm leading-relaxed text-slate-100">
                   {latestReply}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => speakText(latestReply, true)}
-                className="shrink-0 rounded-lg border border-blue-200 bg-white p-2 text-blue-700 hover:bg-blue-100"
+                className="shrink-0 rounded-lg border border-violet-400/30 bg-[#141b38] p-2 text-violet-200 hover:bg-violet-500/25"
                 title="Replay spoken feedback"
               >
                 <Volume2 className="h-4 w-4" />
@@ -866,17 +866,17 @@ export function StudyCoachWorkspace() {
           )}
 
           {/* Multimodal Capture & Action Controls */}
-          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 sm:px-4">
+          <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-[#0f152d] px-3 py-3 sm:px-4">
             <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                <div className="inline-flex rounded-lg border border-white/10 bg-[#080c1d] p-0.5">
                   <button
                     type="button"
                     onClick={() => handleSwitchVideoSource("webcam")}
                     className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                       videoSource === "webcam"
-                        ? "bg-white text-slate-900 shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                        : "text-slate-300 hover:text-white"
                     }`}
                   >
                     <Camera className="h-3.5 w-3.5" />
@@ -887,8 +887,8 @@ export function StudyCoachWorkspace() {
                     onClick={() => handleSwitchVideoSource("screen")}
                     className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                       videoSource === "screen"
-                        ? "bg-white text-slate-900 shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                        : "text-slate-300 hover:text-white"
                     }`}
                   >
                     <Monitor className="h-3.5 w-3.5" />
@@ -900,7 +900,7 @@ export function StudyCoachWorkspace() {
                   <button
                     type="button"
                     onClick={handleFlipCamera}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-white/10 bg-[#141b38] px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-white/10"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     {facingMode === "environment" ? "Rear" : "Front"}
@@ -918,13 +918,13 @@ export function StudyCoachWorkspace() {
                   }}
                   className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                     voiceReadoutEnabled
-                      ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      : "border-slate-200 bg-slate-100 text-slate-500"
+                      ? "border-white/10 bg-[#141b38] text-slate-200 hover:bg-white/10"
+                      : "border-white/10 bg-[#080c1d] text-slate-400"
                   }`}
                 >
                   {voiceReadoutEnabled ? (
                     <>
-                      <Volume2 className="h-3.5 w-3.5 text-blue-700" />
+                      <Volume2 className="h-3.5 w-3.5 text-violet-400" />
                       Voice On
                     </>
                   ) : (
@@ -956,8 +956,8 @@ export function StudyCoachWorkspace() {
                   }}
                   className={`inline-flex min-h-[44px] select-none items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors sm:min-h-[38px] sm:gap-2 sm:px-3.5 ${
                     isRecordingVoice
-                      ? "border-red-600 bg-red-600 text-white shadow-sm"
-                      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                      ? "border-rose-500 bg-rose-600 text-white shadow-sm"
+                      : "border-white/15 bg-[#141b38] text-slate-100 hover:bg-white/10"
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <Mic className="h-3.5 w-3.5 shrink-0" />
@@ -971,7 +971,7 @@ export function StudyCoachWorkspace() {
                   type="button"
                   disabled={isAnalyzing || (!isCameraActive && !textQuestion.trim())}
                   onClick={() => void analyzeSnapshot()}
-                  className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[38px] sm:gap-2 sm:px-4"
+                  className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:from-violet-500 hover:to-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[38px] sm:gap-2 sm:px-4"
                 >
                   {isAnalyzing ? (
                     <>
@@ -1003,12 +1003,12 @@ export function StudyCoachWorkspace() {
                 value={textQuestion}
                 onChange={(e) => setTextQuestion(e.target.value)}
                 placeholder="Type a JAMB/WAEC or step question..."
-                className="min-h-[44px] min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none sm:min-h-[38px] sm:text-xs"
+                className="min-h-[44px] min-w-0 flex-1 rounded-lg border border-white/10 bg-[#141b38] px-3 py-2 text-base text-white placeholder:text-slate-500 focus:border-violet-500 focus:outline-none sm:min-h-[38px] sm:text-xs"
               />
               <button
                 type="submit"
                 disabled={isAnalyzing || !textQuestion.trim()}
-                className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-200 disabled:opacity-50 sm:min-h-[38px]"
+                className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-lg border border-violet-400/30 bg-violet-500/20 px-3.5 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/30 disabled:opacity-50 sm:min-h-[38px]"
               >
                 <Send className="h-3.5 w-3.5" />
                 Ask
@@ -1018,16 +1018,16 @@ export function StudyCoachWorkspace() {
         </section>
 
         {/* Right Sidebar (3 Tabs) */}
-        <aside className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white lg:col-span-5 xl:col-span-4">
+        <aside className="flex min-w-0 flex-col rounded-xl border border-white/10 bg-[#0f152d] lg:col-span-5 xl:col-span-4">
           {/* Tab Switcher */}
-          <div className="grid grid-cols-3 gap-1 border-b border-slate-200 bg-slate-50 p-1">
+          <div className="grid grid-cols-3 gap-1 border-b border-white/10 bg-[#080c1d] p-1">
             <button
               type="button"
               onClick={() => setActiveTab("logic")}
               className={`min-h-[42px] rounded-lg px-1.5 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
                 activeTab === "logic"
-                  ? "bg-white text-blue-800 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                  : "text-slate-300 hover:text-white"
               }`}
             >
               Rubric ({steps.length})
@@ -1037,8 +1037,8 @@ export function StudyCoachWorkspace() {
               onClick={() => setActiveTab("hints")}
               className={`min-h-[42px] rounded-lg px-1.5 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
                 activeTab === "hints"
-                  ? "bg-white text-blue-800 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                  : "text-slate-300 hover:text-white"
               }`}
             >
               Hints ({hints.length})
@@ -1048,8 +1048,8 @@ export function StudyCoachWorkspace() {
               onClick={() => setActiveTab("drill")}
               className={`min-h-[42px] rounded-lg px-1.5 py-1.5 text-[11px] font-semibold leading-tight transition-colors sm:text-xs ${
                 activeTab === "drill"
-                  ? "bg-white text-blue-800 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs"
+                  : "text-slate-300 hover:text-white"
               }`}
             >
               Drill ({drillQuestions.length})
@@ -1061,18 +1061,18 @@ export function StudyCoachWorkspace() {
             {activeTab === "logic" && (
               <>
                 {/* Mastery Meter */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                <div className="rounded-xl border border-white/10 bg-[#141b38]/60 p-3.5">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-bold tracking-wider text-slate-700 uppercase">
+                    <span className="text-xs font-bold tracking-wider text-slate-300 uppercase">
                       Rubric Mastery
                     </span>
-                    <span className="font-mono text-xs font-bold text-blue-700">
+                    <span className="font-mono text-xs font-bold text-violet-300">
                       {totalScore}/{maxScore} ({masteryPct}%)
                     </span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
                     <div
-                      className="h-full rounded-full bg-blue-700 transition-all duration-300"
+                      className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-300"
                       style={{ width: `${masteryPct}%` }}
                     />
                   </div>
@@ -1085,23 +1085,23 @@ export function StudyCoachWorkspace() {
                       return (
                         <div
                           key={item.id}
-                          className="rounded-lg border border-slate-200 bg-white p-2.5"
+                          className="rounded-lg border border-white/10 bg-[#0b1024] p-2.5"
                         >
                           <div className="flex items-center justify-between text-xs">
-                            <span className="font-semibold text-slate-800">
+                            <span className="font-semibold text-white">
                               {item.label}
                             </span>
-                            <span className="font-mono font-semibold text-slate-700">
+                            <span className="font-mono font-semibold text-slate-300">
                               {item.score}/{item.maxScore}
                             </span>
                           </div>
-                          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                             <div
-                              className="h-full rounded-full bg-emerald-600 transition-all"
+                              className="h-full rounded-full bg-emerald-500 transition-all"
                               style={{ width: `${pct}%` }}
                             />
                           </div>
-                          <p className="mt-1 text-[11px] text-slate-500">
+                          <p className="mt-1 text-[11px] text-slate-400">
                             {item.feedback || item.description}
                           </p>
                         </div>
@@ -1112,13 +1112,13 @@ export function StudyCoachWorkspace() {
 
                 {/* Step-by-Step Logic Tracker */}
                 <div>
-                  <h2 className="mb-2 text-xs font-bold tracking-wider text-slate-700 uppercase">
+                  <h2 className="mb-2 text-xs font-bold tracking-wider text-slate-300 uppercase">
                     Step-by-Step Verification
                   </h2>
                   {steps.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-                      Click <strong>Snap &amp; Grade Step</strong> or{" "}
-                      <strong>Hold to Ask Coach</strong> to transcribe and grade
+                    <div className="rounded-xl border border-dashed border-white/15 bg-[#0b1024]/60 p-6 text-center text-xs text-slate-400">
+                      Click <strong className="text-white">Snap &amp; Grade</strong> or{" "}
+                      <strong className="text-white">Hold to Ask</strong> to transcribe and grade
                       your work.
                     </div>
                   ) : (
@@ -1126,10 +1126,10 @@ export function StudyCoachWorkspace() {
                       {steps.map((step) => {
                         const style =
                           step.status === "correct"
-                            ? "border-emerald-200 bg-emerald-50/70"
+                            ? "border-emerald-400/30 bg-emerald-500/15"
                             : step.status === "warning"
-                              ? "border-amber-200 bg-amber-50/70"
-                              : "border-red-200 bg-red-50/70";
+                              ? "border-amber-400/30 bg-amber-500/15"
+                              : "border-rose-400/30 bg-rose-500/15";
                         return (
                           <div
                             key={step.id}
@@ -1138,26 +1138,26 @@ export function StudyCoachWorkspace() {
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-center gap-1.5">
                                 {step.status === "correct" ? (
-                                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
                                 ) : step.status === "warning" ? (
-                                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
                                 ) : (
-                                  <XCircle className="h-4 w-4 shrink-0 text-red-600" />
+                                  <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
                                 )}
-                                <span className="text-xs font-semibold text-slate-900">
+                                <span className="text-xs font-semibold text-white">
                                   Step {step.stepNumber}: {step.concept}
                                 </span>
                               </div>
-                              <span className="font-mono text-[10px] text-slate-500">
+                              <span className="font-mono text-[10px] text-slate-400">
                                 {step.timestamp}
                               </span>
                             </div>
                             {step.lineQuote && (
-                              <pre className="mt-1.5 overflow-x-auto rounded border border-slate-200/80 bg-white/90 px-2 py-1 font-mono text-[11px] text-slate-800">
+                              <pre className="mt-1.5 overflow-x-auto rounded border border-white/10 bg-[#080c1d] px-2 py-1 font-mono text-[11px] text-slate-200">
                                 {step.lineQuote}
                               </pre>
                             )}
-                            <p className="mt-1.5 text-xs leading-snug text-slate-700">
+                            <p className="mt-1.5 text-xs leading-snug text-slate-200">
                               {step.hintGiven}
                             </p>
                           </div>
@@ -1174,13 +1174,13 @@ export function StudyCoachWorkspace() {
               <>
                 <div>
                   <div className="mb-2 flex items-center gap-1.5">
-                    <Lightbulb className="h-4 w-4 text-amber-600" />
-                    <h2 className="text-xs font-bold tracking-wider text-slate-700 uppercase">
+                    <Lightbulb className="h-4 w-4 text-amber-400" />
+                    <h2 className="text-xs font-bold tracking-wider text-slate-300 uppercase">
                       Visual Hint Cards
                     </h2>
                   </div>
                   {hints.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">
+                    <div className="rounded-xl border border-dashed border-white/15 bg-[#0b1024]/60 p-5 text-center text-xs text-slate-400">
                       KaTeX formulas and code pattern hints appear here after
                       analysis.
                     </div>
@@ -1189,10 +1189,10 @@ export function StudyCoachWorkspace() {
                       {hints.map((hint) => (
                         <div
                           key={hint.id}
-                          className="rounded-xl border border-amber-200 bg-amber-50/50 p-3"
+                          className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3"
                         >
                           <div className="mb-1.5 flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold text-slate-900">
+                            <span className="text-xs font-semibold text-white">
                               {hint.title}
                             </span>
                             <span className="font-mono text-[10px] text-slate-400">
@@ -1201,7 +1201,7 @@ export function StudyCoachWorkspace() {
                           </div>
                           <KaTeXBlock snippet={hint.snippet} kind={hint.kind} />
                           {hint.explanation && (
-                            <p className="mt-1.5 text-xs text-slate-700">
+                            <p className="mt-1.5 text-xs text-slate-300">
                               {hint.explanation}
                             </p>
                           )}
@@ -1212,11 +1212,11 @@ export function StudyCoachWorkspace() {
                 </div>
 
                 <div>
-                  <h2 className="mb-2 text-xs font-bold tracking-wider text-slate-700 uppercase">
+                  <h2 className="mb-2 text-xs font-bold tracking-wider text-slate-300 uppercase">
                     Work &amp; Voice Log
                   </h2>
                   {transcripts.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">
+                    <div className="rounded-xl border border-dashed border-white/15 bg-[#0b1024]/60 p-5 text-center text-xs text-slate-400">
                       Transcribed handwriting, voice questions, and coach
                       replies will be logged here.
                     </div>
@@ -1227,14 +1227,14 @@ export function StudyCoachWorkspace() {
                           key={entry.id}
                           className={`rounded-lg border px-3 py-2 text-xs leading-relaxed ${
                             entry.speaker === "coach"
-                              ? "border-blue-100 bg-blue-50/70"
+                              ? "border-violet-400/30 bg-violet-500/15"
                               : entry.speaker === "work"
-                                ? "border-slate-200 bg-slate-50 font-mono text-[11px]"
-                                : "border-emerald-100 bg-emerald-50/60"
+                                ? "border-white/10 bg-[#080c1d] font-mono text-[11px]"
+                                : "border-emerald-400/30 bg-emerald-500/15"
                           }`}
                         >
                           <div className="mb-0.5 flex items-center justify-between">
-                            <span className="text-[10px] font-bold tracking-wide text-slate-600 uppercase">
+                            <span className="text-[10px] font-bold tracking-wide text-slate-300 uppercase">
                               {entry.speaker === "coach"
                                 ? "Coach"
                                 : entry.speaker === "work"
@@ -1245,7 +1245,7 @@ export function StudyCoachWorkspace() {
                               {entry.timestamp}
                             </span>
                           </div>
-                          <p className="whitespace-pre-wrap text-slate-800">
+                          <p className="whitespace-pre-wrap text-slate-100">
                             {entry.text}
                           </p>
                         </div>
@@ -1260,7 +1260,7 @@ export function StudyCoachWorkspace() {
             {activeTab === "drill" && (
               <>
                 {drillQuestions.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                  <div className="rounded-xl border border-dashed border-white/15 bg-[#0b1024]/60 p-6 text-center text-xs text-slate-400">
                     After you snap a step, Gemini generates a 2-question
                     practice drill grounded in real exam standards via Google
                     Search.
@@ -1268,11 +1268,11 @@ export function StudyCoachWorkspace() {
                 ) : (
                   <div className="space-y-4">
                     {weaknessTopic && (
-                      <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                        <p className="text-[10px] font-bold tracking-wider text-blue-700 uppercase">
+                      <div className="rounded-lg border border-violet-400/30 bg-violet-500/15 px-3 py-2">
+                        <p className="text-[10px] font-bold tracking-wider text-violet-300 uppercase">
                           Targeted Practice Topic
                         </p>
-                        <p className="text-xs font-semibold text-slate-900">
+                        <p className="text-xs font-semibold text-white">
                           {weaknessTopic}
                         </p>
                       </div>
@@ -1284,17 +1284,17 @@ export function StudyCoachWorkspace() {
                       return (
                         <div
                           key={q.id}
-                          className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5"
+                          className="rounded-xl border border-white/10 bg-[#141b38]/70 p-3.5"
                         >
                           <div className="mb-1.5 flex items-center justify-between gap-2">
-                            <span className="font-mono text-[10px] font-bold text-slate-500 uppercase">
+                            <span className="font-mono text-[10px] font-bold text-slate-400 uppercase">
                               Question {qIdx + 1}
                             </span>
-                            <span className="rounded bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-slate-200">
+                            <span className="rounded border border-white/10 bg-[#0b1024] px-2 py-0.5 text-[10px] font-medium text-violet-200">
                               {q.examStandard}
                             </span>
                           </div>
-                          <p className="text-xs font-semibold leading-relaxed text-slate-900">
+                          <p className="text-xs font-semibold leading-relaxed text-white">
                             {q.question}
                           </p>
                           <div className="mt-2.5 space-y-1.5">
@@ -1302,14 +1302,14 @@ export function StudyCoachWorkspace() {
                               const isSelected = chosen === optIdx;
                               const isCorrect = optIdx === q.correctIndex;
                               let btnClass =
-                                "border-slate-200 bg-white text-slate-800 hover:bg-slate-50";
+                                "border-white/10 bg-[#0b1024] text-slate-200 hover:bg-white/10";
                               if (answered) {
                                 if (isCorrect) {
                                   btnClass =
-                                    "border-emerald-500 bg-emerald-50 text-emerald-900 font-semibold";
+                                    "border-emerald-400/50 bg-emerald-500/20 text-emerald-100 font-semibold";
                                 } else if (isSelected) {
                                   btnClass =
-                                    "border-red-400 bg-red-50 text-red-900";
+                                    "border-rose-400/50 bg-rose-500/20 text-rose-100";
                                 }
                               }
                               return (
@@ -1330,8 +1330,8 @@ export function StudyCoachWorkspace() {
                             })}
                           </div>
                           {answered && (
-                            <div className="mt-2.5 rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-700">
-                              <span className="font-semibold text-slate-900">
+                            <div className="mt-2.5 rounded-lg border border-white/10 bg-[#0b1024] p-2.5 text-xs text-slate-300">
+                              <span className="font-semibold text-white">
                                 Explanation:{" "}
                               </span>
                               {q.explanation}
@@ -1342,8 +1342,8 @@ export function StudyCoachWorkspace() {
                     })}
 
                     {citations.length > 0 && (
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <p className="mb-2 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                      <div className="rounded-xl border border-white/10 bg-[#0b1024] p-3">
+                        <p className="mb-2 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                           Google Search Grounding Sources
                         </p>
                         <ul className="space-y-1.5">
@@ -1353,7 +1353,7 @@ export function StudyCoachWorkspace() {
                                 href={c.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 hover:underline"
+                                className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-300 hover:underline"
                               >
                                 <ExternalLink className="h-3 w-3 shrink-0" />
                                 <span className="line-clamp-1">{c.title}</span>

@@ -97,7 +97,6 @@ class MainActivity : AppCompatActivity() {
         store = SecureStore(this)
         api = AegisApiClient(store)
 
-        binding.inputBackendUrl.setText(store.apiBaseUrl)
         binding.inputDeviceName.setText("${Build.MANUFACTURER} ${Build.MODEL}")
 
         binding.btnConnectDevice.setOnClickListener { registerDevice() }
@@ -129,6 +128,8 @@ class MainActivity : AppCompatActivity() {
         refreshPermissionBadges()
 
         if (store.isRegistered()) {
+            startConnectorService()
+            scheduleTelemetryWorker()
             lifecycleScope.launch {
                 ensureFcmTokenSynced()
             }
@@ -137,6 +138,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        renderConnectionState()
         refreshPermissionBadges()
     }
 
@@ -269,7 +271,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun registerDevice() {
-        val url = binding.inputBackendUrl.text.toString().trim()
         val email = binding.inputEmail.text.toString().trim()
         val password = binding.inputPassword.text.toString()
         val deviceName = binding.inputDeviceName.text.toString().trim()
@@ -283,7 +284,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             // Explicitly request FCM token before completing device registration
             val fcmToken = fetchFcmTokenSafely()
-            val result = api.loginAndRegisterDevice(url, email, password, deviceName)
+            val result = api.loginAndRegisterDevice(email, password, deviceName)
             binding.btnConnectDevice.isEnabled = true
             result.onSuccess {
                 if (!fcmToken.isNullOrBlank()) {
@@ -356,10 +357,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderConnectionState() {
         val registered = store.isRegistered()
-        binding.txtStatus.text = if (registered) {
-            "Connected • Device ID: ${store.deviceId}"
-        } else {
-            "Not Connected • Sign in to link this Android phone"
+        val expiredReason = store.sessionExpiredReason
+        binding.txtStatus.text = when {
+            registered -> "Connected • Device ID: ${store.deviceId}"
+            !expiredReason.isNullOrBlank() -> "Session Expired • $expiredReason"
+            else -> "Not Connected • Sign in to link this Android phone"
         }
         binding.btnSyncNow.isEnabled = registered
         binding.btnDisconnect.isEnabled = registered

@@ -164,7 +164,10 @@ jobs:
           echo "build_label=$BUILD_LABEL" >> "$GITHUB_OUTPUT"
 
           {
-            echo "## JEE AEGIS Android APK Build Summary"
+            echo "## JEE AEGIS Android APK Build Summary (v1.1.0)"
+            echo "- **Version**: \`1.1.0\` (\`versionCode = 2\`)"
+            echo "- **Package**: \`ng.jee.aegis.connector\`"
+            echo "- **Production Backend**: \`https://jee-aegis.onrender.com\`"
             echo "- **Build Variant**: \`$BUILD_LABEL\`"
             echo "- **Firebase Status**: $FB_STATUS"
             echo "- **Source APK**: \`$APK_SOURCE\`"
@@ -187,13 +190,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="apk-latest"
-          NOTES="Automated JEE AEGIS Android Connector APK (${{ steps.verify_apk.outputs.build_label }}, ${{ steps.verify_apk.outputs.size_mb }} MB). Firebase Status: ${{ steps.firebase_config.outputs.firebase_status }}."
+          NOTES="Automated JEE AEGIS Android Connector APK v1.1.0 (${{ steps.verify_apk.outputs.build_label }}, ${{ steps.verify_apk.outputs.size_mb }} MB). Firebase Status: ${{ steps.firebase_config.outputs.firebase_status }}."
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" public/downloads/jee-aegis.apk#JEE-AEGIS.apk --clobber
+            gh release upload "$TAG" public/downloads/jee-aegis.apk#jee-aegis.apk --clobber
             gh release edit "$TAG" --notes "$NOTES"
           else
-            gh release create "$TAG" public/downloads/jee-aegis.apk#JEE-AEGIS.apk \
-              --title "JEE AEGIS Android Connector APK" \
+            gh release create "$TAG" public/downloads/jee-aegis.apk#jee-aegis.apk \
+              --title "JEE AEGIS Android Connector APK v1.1.0" \
               --notes "$NOTES"
           fi
 

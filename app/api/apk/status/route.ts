@@ -17,6 +17,7 @@ export interface GitHubReleaseAsset {
 export interface GitHubReleasePayload {
   tag_name?: string;
   name?: string;
+  body?: string;
   published_at?: string;
   assets?: GitHubReleaseAsset[];
 }
@@ -24,6 +25,7 @@ export interface GitHubReleasePayload {
 export interface ResolvedApkRelease {
   available: boolean;
   version: string;
+  buildMode: "firebase-enabled" | "non-firebase-fallback";
   releaseTag: string;
   releaseName: string | null;
   publishedAt: string | null;
@@ -54,7 +56,8 @@ export async function resolveGitHubApkRelease(
 ): Promise<ResolvedApkRelease> {
   const baseUnavailable: ResolvedApkRelease = {
     available: false,
-    version: "1.0.0",
+    version: "1.1.0",
+    buildMode: "non-firebase-fallback",
     releaseTag: "apk-latest",
     releaseName: null,
     publishedAt: null,
@@ -131,9 +134,16 @@ export async function resolveGitHubApkRelease(
       };
     }
 
+    const notesAndTitle = `${data.name ?? ""} ${data.body ?? ""}`;
+    const versionMatch = notesAndTitle.match(/v?(\d+\.\d+\.\d+)/i);
+    const detectedVersion = versionMatch ? versionMatch[1] : "1.1.0";
+    const isFirebaseEnabled =
+      /firebase-enabled/i.test(notesAndTitle) && !/non-firebase/i.test(notesAndTitle);
+
     return {
       available: true,
-      version: "1.0.0",
+      version: detectedVersion,
+      buildMode: isFirebaseEnabled ? "firebase-enabled" : "non-firebase-fallback",
       releaseTag: data.tag_name || "apk-latest",
       releaseName: data.name || "JEE AEGIS Android Connector APK",
       publishedAt: data.published_at ?? asset.updated_at ?? null,
@@ -165,6 +175,7 @@ export async function GET(request: NextRequest) {
     {
       available: resolved.available,
       version: resolved.version,
+      buildMode: resolved.buildMode,
       releaseTag: resolved.releaseTag,
       releaseName: resolved.releaseName,
       publishedAt: resolved.publishedAt,

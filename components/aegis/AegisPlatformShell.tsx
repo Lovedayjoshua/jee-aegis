@@ -84,6 +84,15 @@ export function AegisPlatformShell() {
       .finally(() => setCheckingAuth(false));
   }, []);
 
+  useEffect(() => {
+    function onSessionExpired() {
+      setToken(null);
+      setUser(null);
+    }
+    window.addEventListener("aegis:session-expired", onSessionExpired);
+    return () => window.removeEventListener("aegis:session-expired", onSessionExpired);
+  }, []);
+
   function handleAuthenticated(newToken: string, newUser: AegisUser) {
     setToken(newToken);
     setUser(newUser);
@@ -389,9 +398,9 @@ export function AegisPlatformShell() {
           )}
 
           {(activeTab === "devices" || activeTab === "security") && (
-            <div className="mx-auto w-full max-w-6xl rounded-2xl border border-white/10 bg-slate-50 p-3 text-slate-900 shadow-xl sm:p-5">
+            <div className="mx-auto w-full max-w-6xl rounded-2xl border border-violet-500/20 bg-[#0b1024]/90 p-3 text-slate-100 shadow-2xl sm:p-5">
               {checkingAuth ? (
-                <div className="py-12 text-center text-sm text-slate-500">
+                <div className="py-12 text-center text-sm text-slate-400">
                   Verifying JEE AEGIS session...
                 </div>
               ) : !token || !user ? (
