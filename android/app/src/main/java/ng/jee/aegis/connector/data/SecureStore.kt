@@ -33,6 +33,14 @@ class SecureStore(context: Context) {
         get() = prefs.getString("session_expired_reason", null)
         set(value) = prefs.edit().putString("session_expired_reason", value).apply()
 
+    var userEmail: String?
+        get() = prefs.getString("user_email", null)
+        set(value) = prefs.edit().putString("user_email", value).apply()
+
+    var deviceName: String?
+        get() = prefs.getString("device_name", null)
+        set(value) = prefs.edit().putString("device_name", value).apply()
+
     var userToken: String?
         get() = prefs.getString("user_token", null)
         set(value) = prefs.edit().putString("user_token", value).apply()
@@ -82,8 +90,9 @@ class SecureStore(context: Context) {
     }
 
     fun clearDevice() {
+        // Keep device_id, user_email, and device_name so re-signing in on this phone
+        // re-links the existing device record and its command/telemetry history.
         prefs.edit()
-            .remove("device_id")
             .remove("device_secret")
             .remove("user_token")
             .remove("last_synced_fcm_token")

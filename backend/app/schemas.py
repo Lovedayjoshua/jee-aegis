@@ -31,6 +31,17 @@ class UserPublic(BaseModel):
     email: str
     full_name: str
     created_at: datetime
+    preferences: Dict[str, Any] = Field(default_factory=dict)
+
+
+class UserPreferencesUpdateRequest(BaseModel):
+    preferences: Dict[str, Any] = Field(default_factory=dict)
+
+
+class UserPreferencesResponse(BaseModel):
+    user_id: str
+    preferences: Dict[str, Any] = Field(default_factory=dict)
+    updated_at: datetime
 
 
 class AuthResponse(BaseModel):
@@ -40,12 +51,17 @@ class AuthResponse(BaseModel):
 
 
 class DeviceRegisterRequest(BaseModel):
+    device_id: Optional[str] = Field(default=None, max_length=64)
     device_name: str = Field(min_length=1, max_length=120)
     manufacturer: str = Field(default="", max_length=120)
     model: str = Field(default="", max_length=120)
     android_version: str = Field(default="", max_length=64)
     app_version: str = Field(default="1.0.0", max_length=32)
     fcm_token: str = Field(default="", max_length=512)
+
+
+class DeviceUpdateRequest(BaseModel):
+    device_name: str = Field(min_length=1, max_length=120)
 
 
 class DeviceRegisterResponse(BaseModel):

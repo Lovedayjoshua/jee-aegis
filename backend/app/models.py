@@ -36,6 +36,29 @@ class User(Base):
     created_at = Column(DateTime, default=utcnow_naive, nullable=False)
 
     devices = relationship("Device", back_populates="owner", cascade="all, delete-orphan")
+    preference = relationship(
+        "UserPreference",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    preferences_json = Column(JSON, default=dict, nullable=False)
+    updated_at = Column(DateTime, default=utcnow_naive, nullable=False)
+
+    user = relationship("User", back_populates="preference")
 
 
 class Device(Base):

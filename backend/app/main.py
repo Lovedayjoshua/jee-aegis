@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import Base, engine, get_db
+from .database import Base, engine, get_db, is_sqlite
 from .routes_auth import router as auth_router
 from .routes_connector import router as connector_router
 from .routes_devices import router as devices_router
@@ -54,4 +54,10 @@ app.include_router(connector_router)
 @app.get("/health")
 def health_check(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
-    return {"status": "ok", "service": "jee-aegis-backend", "database": "connected"}
+    return {
+        "status": "ok",
+        "service": "jee-aegis-backend",
+        "database": "connected",
+        "engine": "sqlite" if is_sqlite else "postgresql",
+        "persistent": not is_sqlite,
+    }

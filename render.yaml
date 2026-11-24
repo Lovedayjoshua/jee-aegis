@@ -12,7 +12,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRE_MINUTES
-        value: "1440"
+        value: "10080"
       - key: CORS_ORIGINS
         value: "https://jee-aegis-mv4i-roan.vercel.app,http://localhost:3000,http://127.0.0.1:3000"
       - key: DEVICE_ONLINE_THRESHOLD_SECONDS

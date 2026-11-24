@@ -97,7 +97,12 @@ class MainActivity : AppCompatActivity() {
         store = SecureStore(this)
         api = AegisApiClient(store)
 
-        binding.inputDeviceName.setText("${Build.MANUFACTURER} ${Build.MODEL}")
+        if (!store.userEmail.isNullOrBlank()) {
+            binding.inputEmail.setText(store.userEmail)
+        }
+        val savedDeviceName = store.deviceName?.takeIf { it.isNotBlank() }
+            ?: "${Build.MANUFACTURER} ${Build.MODEL}"
+        binding.inputDeviceName.setText(savedDeviceName)
 
         binding.btnConnectDevice.setOnClickListener { registerDevice() }
         binding.btnSyncNow.setOnClickListener { triggerSync() }

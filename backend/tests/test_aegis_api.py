@@ -672,3 +672,124 @@ def test_device_re_registration_deduplication_and_cors_preflight(client: TestCli
     assert devices[0]["id"] == reg_2["device_id"]
 
 
+def test_account_device_and_preferences_persistence_across_logout_login_and_refresh(
+    client: TestClient,
+):
+    # 1. Register user and save workspace preferences + register an Android device + issue command
+    auth_1 = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "persist@jee.ng",
+            "full_name": "Chidinma Okafor",
+            "password": "PersistentPassword123!",
+        },
+    )
+    assert auth_1.status_code == 201
+    token_1 = auth_1.json()["access_token"]
+    user_id = auth_1.json()["user"]["id"]
+    headers_1 = {"Authorization": f"Bearer {token_1}"}
+
+    # Save user preferences (active tab, study state, companion messages)
+    pref_save = client.put(
+        "/api/v1/auth/preferences",
+        headers=headers_1,
+        json={
+            "preferences": {
+                "active_tab": "devices",
+                "companion_state": {
+                    "messages": [{"id": "m1", "role": "user", "content": "Help me locate my phone"}],
+                    "ttsMuted": True,
+                },
+            }
+        },
+    )
+    assert pref_save.status_code == 200
+    assert pref_save.json()["preferences"]["active_tab"] == "devices"
+
+    # Partial update merges without wiping existing keys
+    pref_merge = client.put(
+        "/api/v1/auth/preferences",
+        headers=headers_1,
+        json={"preferences": {"selected_device_id": "dev-1"}},
+    )
+    assert pref_merge.status_code == 200
+    assert pref_merge.json()["preferences"]["active_tab"] == "devices"
+    assert pref_merge.json()["preferences"]["selected_device_id"] == "dev-1"
+
+    # Register Android device and issue a command
+    dev_reg = client.post(
+        "/api/v1/devices/register",
+        headers=headers_1,
+        json={
+            "device_name": "Chidinma Pixel 8",
+            "manufacturer": "Google",
+            "model": "Pixel 8",
+            "android_version": "15",
+            "app_version": "1.1.0",
+        },
+    ).json()
+    device_id = dev_reg["device_id"]
+
+    cmd = client.post(
+        f"/api/v1/devices/{device_id}/commands",
+        headers=headers_1,
+        json={"command_type": "TORCH_ON"},
+    )
+    assert cmd.status_code == 201
+    cmd_id = cmd.json()["id"]
+
+    # 2. Simulate Logout -> Login (new JWT token)
+    login_res = client.post(
+        "/api/v1/auth/login",
+        json={"email": "persist@jee.ng", "password": "PersistentPassword123!"},
+    )
+    assert login_res.status_code == 200
+    login_data = login_res.json()
+    assert login_data["user"]["id"] == user_id
+    assert login_data["user"]["preferences"]["active_tab"] == "devices"
+    assert login_data["user"]["preferences"]["companion_state"]["ttsMuted"] is True
+
+    headers_2 = {"Authorization": f"Bearer {login_data['access_token']}"}
+
+    # 3. Simulate Browser Refresh (/api/v1/auth/me + /api/v1/auth/refresh + /api/v1/devices + commands)
+    me_res = client.get("/api/v1/auth/me", headers=headers_2)
+    assert me_res.status_code == 200
+    assert me_res.json()["id"] == user_id
+    assert me_res.json()["preferences"]["selected_device_id"] == "dev-1"
+
+    refresh_res = client.post("/api/v1/auth/refresh", headers=headers_2)
+    assert refresh_res.status_code == 200
+    headers_3 = {"Authorization": f"Bearer {refresh_res.json()['access_token']}"}
+
+    devices_after = client.get("/api/v1/devices", headers=headers_3).json()
+    assert len(devices_after) == 1
+    assert devices_after[0]["id"] == device_id
+    assert devices_after[0]["device_name"] == "Chidinma Pixel 8"
+
+    cmds_after = client.get(f"/api/v1/devices/{device_id}/commands", headers=headers_3).json()
+    assert len(cmds_after) == 1
+    assert cmds_after[0]["id"] == cmd_id
+    assert cmds_after[0]["command_type"] == "TORCH_ON"
+
+    # 4. Re-registering phone by passing existing device_id updates name and preserves command history
+    re_reg = client.post(
+        "/api/v1/devices/register",
+        headers=headers_3,
+        json={
+            "device_id": device_id,
+            "device_name": "Chidinma Pixel 8 (Renamed)",
+            "manufacturer": "Google",
+            "model": "Pixel 8",
+            "android_version": "15",
+            "app_version": "1.1.0",
+        },
+    ).json()
+    assert re_reg["device_id"] == device_id
+    cmds_still_preserved = client.get(
+        f"/api/v1/devices/{device_id}/commands", headers=headers_3
+    ).json()
+    assert len(cmds_still_preserved) == 1
+    assert cmds_still_preserved[0]["id"] == cmd_id
+
+
+

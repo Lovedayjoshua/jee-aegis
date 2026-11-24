@@ -16,9 +16,13 @@ import {
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import {
+  AegisAuthError,
   fetchCurrentUser,
   getStoredToken,
+  getStoredUser,
+  saveUserPreferences,
   setStoredToken,
+  setStoredUser,
 } from "@/lib/aegis/api";
 import { AegisUser } from "@/lib/aegis/types";
 
@@ -59,6 +63,39 @@ type PlatformTab =
   | "apk"
   | "security";
 
+const ACTIVE_TAB_KEY = "jee_aegis_active_tab_v1";
+const VALID_TABS: PlatformTab[] = ["welcome", "study", "companion", "devices", "apk", "security"];
+
+function hydrateLocalWorkspaceFromPreferences(prefs?: Record<string, unknown>) {
+  if (typeof window === "undefined" || !prefs) return;
+  try {
+    if (typeof prefs.selected_device_id === "string" && prefs.selected_device_id) {
+      window.localStorage.setItem("jee_aegis_selected_device_v1", prefs.selected_device_id);
+    }
+    if (prefs.companion_state && typeof prefs.companion_state === "object") {
+      window.localStorage.setItem(
+        "jee_aegis_companion_state_v1",
+        JSON.stringify(prefs.companion_state)
+      );
+    }
+    if (prefs.study_active_state && typeof prefs.study_active_state === "object") {
+      window.localStorage.setItem(
+        "jee_aegis_study_active_v1",
+        JSON.stringify(prefs.study_active_state)
+      );
+    }
+    if (Array.isArray(prefs.study_sessions) && prefs.study_sessions.length > 0) {
+      window.localStorage.setItem(
+        "socraticlab_study_sessions_v1",
+        JSON.stringify(prefs.study_sessions)
+      );
+    }
+    window.dispatchEvent(new CustomEvent("aegis:preferences-restored", { detail: prefs }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function AegisPlatformShell() {
   const [activeTab, setActiveTab] = useState<PlatformTab>("welcome");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -68,18 +105,42 @@ export function AegisPlatformShell() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
+    try {
+      const savedTab = window.localStorage.getItem(ACTIVE_TAB_KEY) as PlatformTab | null;
+      if (savedTab && VALID_TABS.includes(savedTab)) {
+        setActiveTab(savedTab);
+      }
+    } catch {
+      // ignore storage errors
+    }
+
     const saved = getStoredToken();
+    const cachedUser = getStoredUser();
     if (!saved) {
       setCheckingAuth(false);
       return;
     }
+
+    if (cachedUser) {
+      setToken(saved);
+      setUser(cachedUser);
+      setCheckingAuth(false);
+    }
+
     fetchCurrentUser(saved)
       .then((u) => {
         setToken(saved);
         setUser(u);
+        setStoredUser(u);
+        hydrateLocalWorkspaceFromPreferences(u.preferences);
       })
-      .catch(() => {
-        setStoredToken(null);
+      .catch((err) => {
+        // Only clear stored session on an explicit 401 Unauthorized — never on a network blip or cold-start timeout
+        if (err instanceof AegisAuthError && err.status === 401) {
+          setStoredToken(null);
+          setToken(null);
+          setUser(null);
+        }
       })
       .finally(() => setCheckingAuth(false));
   }, []);
@@ -94,12 +155,16 @@ export function AegisPlatformShell() {
   }, []);
 
   function handleAuthenticated(newToken: string, newUser: AegisUser) {
+    setStoredToken(newToken);
+    setStoredUser(newUser);
     setToken(newToken);
     setUser(newUser);
+    hydrateLocalWorkspaceFromPreferences(newUser.preferences);
   }
 
   function handleSignOut() {
     setStoredToken(null);
+    setStoredUser(null);
     setToken(null);
     setUser(null);
   }
@@ -115,6 +180,14 @@ export function AegisPlatformShell() {
   function navigateTo(tab: PlatformTab) {
     setActiveTab(tab);
     setMobileMenuOpen(false);
+    try {
+      window.localStorage.setItem(ACTIVE_TAB_KEY, tab);
+    } catch {
+      // ignore
+    }
+    if (token) {
+      void saveUserPreferences(token, { active_tab: tab }).catch(() => {});
+    }
   }
 
   return (

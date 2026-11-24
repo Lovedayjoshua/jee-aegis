@@ -25,6 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { getStoredToken, saveUserPreferences } from "@/lib/aegis/api";
 import { captureScaledJpegFrame } from "@/lib/video/frame-capturer";
 import { getScenarioById, STUDY_SCENARIOS } from "@/lib/study-coach/scenarios";
 import {
@@ -45,6 +46,7 @@ import { SessionSummaryModal } from "./SessionSummaryModal";
 type SidebarTab = "logic" | "hints" | "drill";
 
 const LOCAL_STORAGE_KEY = "socraticlab_study_sessions_v1";
+const ACTIVE_STUDY_KEY = "jee_aegis_study_active_v1";
 
 function nowLabel(): string {
   return new Date().toLocaleTimeString([], {
@@ -151,6 +153,86 @@ export function StudyCoachWorkspace() {
   const startedAtRef = useRef<string>("");
 
   const scenario = getScenarioById(scenarioId);
+
+  useEffect(() => {
+    function restoreStudyState() {
+      try {
+        const raw = window.localStorage.getItem(ACTIVE_STUDY_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          scenarioId?: string;
+          mode?: CoachMode;
+          steps?: StepAssessment[];
+          rubric?: RubricCriterion[];
+          hints?: VisualHintCard[];
+          transcripts?: TranscriptEntry[];
+          latestReply?: string | null;
+          weaknessTopic?: string | null;
+          drillQuestions?: DrillQuestion[];
+          selectedAnswers?: Record<string, number>;
+          voiceReadoutEnabled?: boolean;
+        };
+        if (parsed.scenarioId) setScenarioId(parsed.scenarioId);
+        if (parsed.mode === "coach" || parsed.mode === "exam") setMode(parsed.mode);
+        if (Array.isArray(parsed.steps)) setSteps(parsed.steps);
+        if (Array.isArray(parsed.rubric) && parsed.rubric.length > 0) setRubric(parsed.rubric);
+        if (Array.isArray(parsed.hints)) setHints(parsed.hints);
+        if (Array.isArray(parsed.transcripts)) setTranscripts(parsed.transcripts);
+        if (parsed.latestReply !== undefined) setLatestReply(parsed.latestReply);
+        if (parsed.weaknessTopic !== undefined) setWeaknessTopic(parsed.weaknessTopic);
+        if (Array.isArray(parsed.drillQuestions)) setDrillQuestions(parsed.drillQuestions);
+        if (parsed.selectedAnswers && typeof parsed.selectedAnswers === "object") {
+          setSelectedAnswers(parsed.selectedAnswers);
+        }
+        if (typeof parsed.voiceReadoutEnabled === "boolean") {
+          setVoiceReadoutEnabled(parsed.voiceReadoutEnabled);
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    restoreStudyState();
+    window.addEventListener("aegis:preferences-restored", restoreStudyState);
+    return () => window.removeEventListener("aegis:preferences-restored", restoreStudyState);
+  }, []);
+
+  useEffect(() => {
+    const activeSnapshot = {
+      scenarioId,
+      mode,
+      steps: steps.slice(-25),
+      rubric,
+      hints: hints.slice(-15),
+      transcripts: transcripts.slice(-25),
+      latestReply,
+      weaknessTopic,
+      drillQuestions,
+      selectedAnswers,
+      voiceReadoutEnabled,
+    };
+    try {
+      window.localStorage.setItem(ACTIVE_STUDY_KEY, JSON.stringify(activeSnapshot));
+    } catch {
+      // ignore storage errors
+    }
+    const token = getStoredToken();
+    if (token) {
+      void saveUserPreferences(token, { study_active_state: activeSnapshot }).catch(() => {});
+    }
+  }, [
+    scenarioId,
+    mode,
+    steps,
+    rubric,
+    hints,
+    transcripts,
+    latestReply,
+    weaknessTopic,
+    drillQuestions,
+    selectedAnswers,
+    voiceReadoutEnabled,
+  ]);
 
   const speakText = useCallback(
     (text: string, force = false) => {
@@ -566,10 +648,12 @@ export function StudyCoachWorkspace() {
     try {
       const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
       const prev = raw ? (JSON.parse(raw) as StudySessionRecord[]) : [];
-      window.localStorage.setItem(
-        LOCAL_STORAGE_KEY,
-        JSON.stringify([record, ...prev].slice(0, 20))
-      );
+      const updated = [record, ...prev].slice(0, 20);
+      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      const token = getStoredToken();
+      if (token) {
+        void saveUserPreferences(token, { study_sessions: updated }).catch(() => {});
+      }
     } catch {
       // Ignore storage errors
     }

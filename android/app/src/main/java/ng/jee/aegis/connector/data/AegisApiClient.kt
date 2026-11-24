@@ -74,8 +74,11 @@ class AegisApiClient(private val store: SecureStore) {
                 JSONObject(raw).getString("access_token")
             }
             store.userToken = token
+            store.userEmail = email
+            store.deviceName = deviceName
 
             val regBody = JSONObject()
+                .put("device_id", store.deviceId.orEmpty())
                 .put("device_name", deviceName)
                 .put("manufacturer", Build.MANUFACTURER)
                 .put("model", Build.MODEL)

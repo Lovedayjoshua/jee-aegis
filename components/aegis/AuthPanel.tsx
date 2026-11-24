@@ -2,7 +2,7 @@
 
 import { Lock, Mail, ShieldCheck, User, Loader2 } from "lucide-react";
 import { FormEvent, useState } from "react";
-import { loginUser, registerUser, setStoredToken } from "@/lib/aegis/api";
+import { loginUser, registerUser, setStoredToken, setStoredUser } from "@/lib/aegis/api";
 import { AegisUser } from "@/lib/aegis/types";
 
 interface AuthPanelProps {
@@ -27,6 +27,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
           ? await registerUser(email, fullName, password)
           : await loginUser(email, password);
       setStoredToken(res.access_token);
+      setStoredUser(res.user);
       onAuthenticated(res.access_token, res.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed");

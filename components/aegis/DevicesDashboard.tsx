@@ -24,6 +24,7 @@ import {
   fetchDevices,
   issueDeviceCommand,
   revokeDevice,
+  saveUserPreferences,
 } from "@/lib/aegis/api";
 import { AegisCommand, AegisCommandType, AegisDevice } from "@/lib/aegis/types";
 import { DeviceMap } from "./DeviceMap";
@@ -47,7 +48,12 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
       const list = await fetchDevices(token);
       setDevices(list);
       if (list.length > 0 && (!selectedId || !list.some((d) => d.id === selectedId))) {
-        setSelectedId(list[0].id);
+        const storedId =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem("jee_aegis_selected_device_v1")
+            : null;
+        const match = storedId && list.some((d) => d.id === storedId) ? storedId : list[0].id;
+        setSelectedId(match);
       }
     } catch (err) {
       setBanner({
@@ -198,7 +204,15 @@ export function DevicesDashboard({ token }: DevicesDashboardProps) {
                 <button
                   key={dev.id}
                   type="button"
-                  onClick={() => setSelectedId(dev.id)}
+                  onClick={() => {
+                    setSelectedId(dev.id);
+                    try {
+                      window.localStorage.setItem("jee_aegis_selected_device_v1", dev.id);
+                    } catch {
+                      // ignore
+                    }
+                    void saveUserPreferences(token, { selected_device_id: dev.id }).catch(() => {});
+                  }}
                   className={`w-full rounded-xl border p-3.5 text-left transition ${
                     active
                       ? "border-violet-500 bg-violet-500/15 ring-1 ring-violet-500"

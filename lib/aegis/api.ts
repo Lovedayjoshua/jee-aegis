@@ -4,10 +4,21 @@ import {
   AegisCommandType,
   AegisDevice,
   AegisUser,
+  AegisUserPreferencesResponse,
   AuditLogItem,
 } from "./types";
 
 const TOKEN_KEY = "jee_aegis_token_v1";
+const USER_KEY = "jee_aegis_user_v1";
+
+export class AegisAuthError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AegisAuthError";
+    this.status = status;
+  }
+}
 
 export function getApiBaseUrl(): string {
   return (
@@ -27,6 +38,30 @@ export function setStoredToken(token: string | null): void {
     window.localStorage.setItem(TOKEN_KEY, token);
   } else {
     window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(USER_KEY);
+  }
+}
+
+export function getStoredUser(): AegisUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as AegisUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredUser(user: AegisUser | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (user) {
+      window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      window.localStorage.removeItem(USER_KEY);
+    }
+  } catch {
+    // ignore storage quota errors
   }
 }
 
@@ -46,7 +81,7 @@ async function apiFetch<T>(
   const controller = new AbortController();
   const timeoutId =
     typeof window !== "undefined"
-      ? window.setTimeout(() => controller.abort(), 15000)
+      ? window.setTimeout(() => controller.abort(), 30000)
       : null;
 
   try {
@@ -57,15 +92,27 @@ async function apiFetch<T>(
     });
 
     const text = await res.text();
-    const data = text ? JSON.parse(text) : {};
+    let data: Record<string, unknown> = {};
+    if (text) {
+      try {
+        data = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        data = { detail: text };
+      }
+    }
     if (!res.ok) {
+      const msg =
+        (typeof data.detail === "string" && data.detail) ||
+        (typeof data.error === "string" && data.error) ||
+        `Request failed (${res.status})`;
       if (res.status === 401 && token) {
         setStoredToken(null);
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("aegis:session-expired"));
         }
+        throw new AegisAuthError(msg, 401);
       }
-      throw new Error(data.detail || data.error || `Request failed (${res.status})`);
+      throw new Error(msg);
     }
     return data as T;
   } catch (err) {
@@ -103,6 +150,34 @@ export async function loginUser(
 
 export async function fetchCurrentUser(token: string): Promise<AegisUser> {
   return apiFetch<AegisUser>("/api/v1/auth/me", { method: "GET" }, token);
+}
+
+export async function refreshSessionToken(token: string): Promise<AegisAuthResponse> {
+  return apiFetch<AegisAuthResponse>("/api/v1/auth/refresh", { method: "POST" }, token);
+}
+
+export async function fetchUserPreferences(
+  token: string
+): Promise<AegisUserPreferencesResponse> {
+  return apiFetch<AegisUserPreferencesResponse>(
+    "/api/v1/auth/preferences",
+    { method: "GET" },
+    token
+  );
+}
+
+export async function saveUserPreferences(
+  token: string,
+  preferences: Record<string, unknown>
+): Promise<AegisUserPreferencesResponse> {
+  return apiFetch<AegisUserPreferencesResponse>(
+    "/api/v1/auth/preferences",
+    {
+      method: "PUT",
+      body: JSON.stringify({ preferences }),
+    },
+    token
+  );
 }
 
 export async function fetchDevices(token: string): Promise<AegisDevice[]> {

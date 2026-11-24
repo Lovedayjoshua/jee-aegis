@@ -80,10 +80,12 @@ def get_current_user(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
 
+    # Set RLS context before querying User so PostgreSQL RLS policies on `users` permit the lookup
+    set_rls_user_context(db, str(user_id))
     user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
     if not user:
+        db.info.pop("rls_user_id", None)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-    set_rls_user_context(db, user.id)
     return user
 
 

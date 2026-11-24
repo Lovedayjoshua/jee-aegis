@@ -13,6 +13,13 @@ export interface AegisUser {
   email: string;
   full_name: string;
   created_at: string;
+  preferences?: Record<string, unknown>;
+}
+
+export interface AegisUserPreferencesResponse {
+  user_id: string;
+  preferences: Record<string, unknown>;
+  updated_at: string;
 }
 
 export interface AegisAuthResponse {

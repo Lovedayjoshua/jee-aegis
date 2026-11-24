@@ -1,11 +1,13 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
 
 
 def normalize_database_url(url: str) -> str:
-    trimmed = url.strip()
+    trimmed = (url or "").strip()
+    if not trimmed:
+        return "sqlite:///./aegis.db"
     if trimmed.startswith("postgres://"):
         return "postgresql+psycopg2://" + trimmed[len("postgres://") :]
     if trimmed.startswith("postgresql://") and "+psycopg2" not in trimmed:
@@ -30,6 +32,29 @@ class Base(DeclarativeBase):
     pass
 
 
+def _apply_postgres_rls_setting(db: Session, clean_uid: str) -> None:
+    bind = db.get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect_name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.current_user_id', :uid, true)"),
+            {"uid": clean_uid},
+        )
+
+
+@event.listens_for(SessionLocal, "after_begin")
+def _reapply_rls_on_new_transaction(session: Session, _transaction, _connection) -> None:
+    """
+    When a request commits a transaction mid-flight (e.g., expiring stale commands or
+    committing a row before refreshing it), PostgreSQL resets transaction-local
+    `set_config(..., true)` settings. This hook automatically re-applies `app.current_user_id`
+    whenever a new transaction begins on the same authenticated session.
+    """
+    uid = session.info.get("rls_user_id")
+    if uid:
+        _apply_postgres_rls_setting(session, uid)
+
+
 def set_rls_user_context(db: Session, user_id: str) -> None:
     """
     Sets the transaction-scoped PostgreSQL `app.current_user_id` setting (`is_local = true`)
@@ -41,13 +66,7 @@ def set_rls_user_context(db: Session, user_id: str) -> None:
     if not clean_uid:
         return
     db.info["rls_user_id"] = clean_uid
-    bind = db.get_bind()
-    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
-    if dialect_name == "postgresql":
-        db.execute(
-            text("SELECT set_config('app.current_user_id', :uid, true)"),
-            {"uid": clean_uid},
-        )
+    _apply_postgres_rls_setting(db, clean_uid)
 
 
 def get_db():

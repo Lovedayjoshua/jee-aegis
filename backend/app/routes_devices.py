@@ -16,6 +16,7 @@ from .schemas import (
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     DeviceSummary,
+    DeviceUpdateRequest,
     TelemetrySnapshot,
 )
 from .security import generate_device_secret, get_current_user, hash_device_secret
@@ -130,6 +131,7 @@ def register_device(
 ):
     now = utcnow_naive()
     raw_secret = generate_device_secret()
+    clean_id = (payload.device_id or "").strip()
     clean_name = payload.device_name.strip()
     clean_mfg = payload.manufacturer.strip()
     clean_model = payload.model.strip()
@@ -137,27 +139,40 @@ def register_device(
     clean_app_ver = payload.app_version.strip()
     clean_fcm = payload.fcm_token.strip()
 
-    # Reuse existing non-revoked device entry for the same user + phone identity
-    # so re-signing in on the same physical phone keeps the same device_id.
-    existing = (
-        db.query(Device)
-        .filter(
-            Device.user_id == current_user.id,
-            Device.device_name == clean_name,
-            Device.manufacturer == clean_mfg,
-            Device.model == clean_model,
-            Device.is_revoked.is_(False),
+    # 1. If the phone passed its previously assigned device_id for this user, reuse that exact record
+    existing = None
+    if clean_id:
+        existing = (
+            db.query(Device)
+            .filter(Device.id == clean_id, Device.user_id == current_user.id)
+            .first()
         )
-        .order_by(Device.created_at.desc())
-        .first()
-    )
+
+    # 2. Otherwise reuse existing non-revoked device entry for the same user + phone identity
+    if not existing:
+        existing = (
+            db.query(Device)
+            .filter(
+                Device.user_id == current_user.id,
+                Device.device_name == clean_name,
+                Device.manufacturer == clean_mfg,
+                Device.model == clean_model,
+                Device.is_revoked.is_(False),
+            )
+            .order_by(Device.created_at.desc())
+            .first()
+        )
 
     if existing:
         device = existing
+        device.device_name = clean_name
+        device.manufacturer = clean_mfg or device.manufacturer
+        device.model = clean_model or device.model
         device.android_version = clean_android or device.android_version
         device.app_version = clean_app_ver or device.app_version
         if clean_fcm:
             device.fcm_token = clean_fcm
+        device.is_revoked = False
         device.device_secret_hash = hash_device_secret(raw_secret)
         device.last_seen_at = now
         db.flush()
@@ -204,6 +219,20 @@ def get_device(
     db: Session = Depends(get_db),
 ):
     device = _get_owned_device(db, current_user.id, device_id)
+    return _build_device_summary(db, device)
+
+
+@router.patch("/devices/{device_id}", response_model=DeviceSummary)
+def update_device(
+    device_id: str,
+    payload: DeviceUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    device = _get_owned_device(db, current_user.id, device_id)
+    device.device_name = payload.device_name.strip()
+    db.commit()
+    db.refresh(device)
     return _build_device_summary(db, device)
 
 

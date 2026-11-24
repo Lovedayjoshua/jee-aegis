@@ -12,6 +12,15 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS user_preferences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    preferences_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON user_preferences(user_id);
+
 CREATE TABLE IF NOT EXISTS devices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -93,6 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_device_location
 
 -- Row Level Security (RLS) for Supabase / PostgreSQL deployments
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE device_telemetry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE device_commands ENABLE ROW LEVEL SECURITY;
@@ -104,6 +114,11 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY users_self_select ON users
     FOR SELECT USING (
         COALESCE(NULLIF(current_setting('app.current_user_id', true), '')::uuid, auth.uid()) = id
+    );
+
+CREATE POLICY preferences_owner_all ON user_preferences
+    FOR ALL USING (
+        COALESCE(NULLIF(current_setting('app.current_user_id', true), '')::uuid, auth.uid()) = user_id
     );
 
 CREATE POLICY devices_owner_all ON devices

@@ -20,7 +20,10 @@ import {
   VolumeX,
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { getStoredToken, saveUserPreferences } from "@/lib/aegis/api";
 import { captureScaledJpegFrame } from "@/lib/video/frame-capturer";
+
+const COMPANION_STORAGE_KEY = "jee_aegis_companion_state_v1";
 
 interface ChatMessage {
   id: string;
@@ -149,7 +152,44 @@ export function LiveCompanionWorkspace() {
       typeof navigator !== "undefined" &&
       typeof navigator.mediaDevices?.getDisplayMedia === "function";
     setScreenShareSupported(supported);
+
+    function restoreCompanionState() {
+      try {
+        const raw = window.localStorage.getItem(COMPANION_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          messages?: ChatMessage[];
+          ttsMuted?: boolean;
+        };
+        if (Array.isArray(parsed.messages)) {
+          setMessages(parsed.messages.filter((m) => !m.streaming));
+        }
+        if (typeof parsed.ttsMuted === "boolean") {
+          setTtsMuted(parsed.ttsMuted);
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    restoreCompanionState();
+    window.addEventListener("aegis:preferences-restored", restoreCompanionState);
+    return () => window.removeEventListener("aegis:preferences-restored", restoreCompanionState);
   }, []);
+
+  useEffect(() => {
+    const settled = messages.filter((m) => !m.streaming).slice(-30);
+    const snapshot = { messages: settled, ttsMuted };
+    try {
+      window.localStorage.setItem(COMPANION_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // ignore storage errors
+    }
+    const token = getStoredToken();
+    if (token) {
+      void saveUserPreferences(token, { companion_state: snapshot }).catch(() => {});
+    }
+  }, [messages, ttsMuted]);
 
   // Attach cameraStream to cameraVideoRef AFTER the <video> element mounts (fixes iOS Safari/Chrome black screen)
   useEffect(() => {
