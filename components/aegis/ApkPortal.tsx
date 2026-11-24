@@ -97,12 +97,12 @@ export function ApkPortal() {
             {isAvailable && status ? (
               <>
                 <a
-                  href="/downloads/jee-aegis.apk"
-                  download={status.fileName || "JEE-AEGIS.apk"}
+                  href={status.downloadUrl || "/api/apk/download"}
+                  download={status.fileName || "jee-aegis.apk"}
                   className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-indigo-500 md:w-auto"
                 >
                   <Download className="h-4 w-4 shrink-0" />
-                  Download {status.fileName || "JEE-AEGIS.apk"}
+                  Download {status.fileName || "jee-aegis.apk"}
                 </a>
                 <span className="text-xs text-slate-300 md:text-right">
                   Version {status.version} • {(status.sizeBytes / (1024 * 1024)).toFixed(1)} MB
